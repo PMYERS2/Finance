@@ -264,12 +264,12 @@ def compute_barista_fi_age_bridge(
 
 
 # =========================================================
-# Tax model (federal only, single filer, approximate)
+# Tax model (federal + FICA + optional state)
 # =========================================================
 def federal_tax_single_approx(income):
     """
-    Approximate US federal income tax for a single filer, no state tax.
-    Uses bracket thresholds in today's dollars; applied directly to real income.
+    Approximate US federal income tax for a single filer, no deductions.
+    Applied directly to real income.
     """
     if income <= 0:
         return 0.0
@@ -286,15 +286,13 @@ def federal_tax_single_approx(income):
     top_rate = 0.37
 
     tax = 0.0
-    remaining = income
 
     for lower, upper, rate in brackets:
-        if remaining <= 0:
+        if income <= lower:
             break
-        span = min(upper - lower, max(remaining - lower, 0.0))
+        span = min(income, upper) - lower
         if span > 0:
             tax += span * rate
-        remaining = income - upper
         if income <= upper:
             break
 
@@ -302,6 +300,31 @@ def federal_tax_single_approx(income):
         tax += (income - brackets[-1][1]) * top_rate
 
     return max(tax, 0.0)
+
+
+def total_tax_on_earned(income, state_tax_rate):
+    """
+    Total tax on earned income:
+      - Federal income tax (approx)
+      - Social Security (6.2% up to wage base)
+      - Medicare (1.45% on all wages)
+      - Flat state income tax (user input)
+    All in real dollars if income is real.
+    """
+    if income <= 0:
+        return 0.0
+
+    federal = federal_tax_single_approx(income)
+
+    ss_wage_base = 168600.0
+    ss_rate = 0.062
+    medicare_rate = 0.0145
+
+    ss_tax = ss_rate * min(income, ss_wage_base)
+    medicare_tax = medicare_rate * income
+    state_tax = max(state_tax_rate, 0.0) * income
+
+    return federal + ss_tax + medicare_tax + state_tax
 
 
 # =========================================================
@@ -317,15 +340,16 @@ def build_income_schedule(
     infl_rate,
     savings_rate_override=0.0,
     show_real=True,
+    state_tax_rate=0.0,
 ):
     """
     Build a per-year income / expense / investable schedule.
-    Values are returned in real (today's) dollars if show_real=True.
+    All values returned in real (today's) dollars if show_real=True.
 
     Taxes:
       - Treat start_income as pre-tax.
-      - Apply approximate US federal brackets (single filer, no state tax).
-      - Expenses are assumed to be after-tax.
+      - Apply federal + FICA + flat state tax to income.
+      - Expenses are assumed after-tax.
     """
     years = retirement_age - current_age
     rows = []
@@ -341,7 +365,7 @@ def build_income_schedule(
         else:
             income_real = income_nominal
 
-        tax_real = federal_tax_single_approx(income_real)
+        tax_real = total_tax_on_earned(income_real, state_tax_rate)
         after_tax_income_real = max(income_real - tax_real, 0.0)
 
         expense_real_base = expense_today * ((1 + expense_growth_rate) ** y)
@@ -376,7 +400,7 @@ def build_income_schedule(
 
 
 # =========================================================
-# Glide-path for returns
+# Glide path
 # =========================================================
 def glide_path_return(age, base_return):
     if age <= 35:
@@ -417,7 +441,9 @@ def main():
 
     years_plot = retirement_age - current_age
     if years_plot <= 0:
-        st.error("Traditional FI age must be greater than current age and below the FI horizon (90).")
+        st.error(
+            "Traditional FI age must be greater than current age and below the FI horizon (90)."
+        )
         return
 
     start_balance_input = st.sidebar.number_input(
@@ -477,8 +503,20 @@ def main():
         / 100.0
     )
 
+    state_tax_rate = (
+        st.sidebar.number_input(
+            "State income tax rate (% of income)",
+            value=0.0,
+            step=0.5,
+            min_value=0.0,
+            max_value=20.0,
+            key="state_tax_rate",
+        )
+        / 100.0
+    )
+
     expense_today = st.sidebar.number_input(
-        "Current total expenses ($/yr, today's $)",
+        "Current total expenses (per year, today's dollars)",
         value=36000,
         step=1000,
         min_value=0,
@@ -736,7 +774,7 @@ def main():
     else:
         car_cost_today = first_car_age = car_interval_years = None
 
-    # Income schedule (after-tax)
+    # Income schedule (after all taxes)
     df_income = build_income_schedule(
         current_age=current_age,
         retirement_age=retirement_age,
@@ -747,6 +785,7 @@ def main():
         infl_rate=infl_rate,
         savings_rate_override=savings_rate_override,
         show_real=show_real,
+        state_tax_rate=state_tax_rate,
     )
 
     # Full-horizon schedules
@@ -1227,7 +1266,7 @@ def main():
         if len(df_income) > 0:
             first_row = df_income.iloc[0]
             assumptions.append(
-                f"- Current income model (after federal tax, no state): income ≈ "
+                f"- Current income model (after income tax + FICA + state): income ≈ "
                 f"${first_row['IncomeRealAfterTax']:,.0f}/yr, expenses ≈ "
                 f"${first_row['ExpensesReal']:,.0f}/yr, investable ≈ "
                 f"${first_row['InvestableRealAnnual']:,.0f}/yr "
@@ -1419,7 +1458,7 @@ def main():
 
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-        # Annual return by age chart (nominal + real)
+        # Annual return by age chart (nominal + real), y-axis from 0
         st.markdown("### Annual return by age")
 
         nominal_pct = [r * 100 for r in annual_rates_by_year_full]
@@ -1435,6 +1474,9 @@ def main():
                 "Real": real_pct,
             }
         )
+
+        y_max_ret = max(max(nominal_pct), max(real_pct))
+        y_max_ret = y_max_ret * 1.1 if y_max_ret > 0 else 1.0
 
         fig_ret = go.Figure()
         fig_ret.add_trace(
@@ -1463,6 +1505,7 @@ def main():
             ),
             xaxis_title="Age (years)",
             yaxis_title="Annual return (%)",
+            yaxis=dict(range=[0, y_max_ret]),
             margin=dict(l=40, r=40, t=60, b=40),
             legend=dict(
                 orientation="h",
@@ -1478,7 +1521,7 @@ def main():
 
         st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
 
-        # Income trajectory chart
+        # Income trajectory chart, y-axis from 0
         st.markdown("### Income trajectory (after tax)")
 
         fig_inc = go.Figure()
@@ -1487,7 +1530,7 @@ def main():
                 x=df_income["Age"],
                 y=df_income["IncomeRealAfterTax"],
                 mode="lines",
-                name="Income (after federal tax, real)",
+                name="Income (after all taxes, real)",
             )
         )
         fig_inc.add_trace(
@@ -1507,6 +1550,13 @@ def main():
             )
         )
 
+        y_max_inc = max(
+            df_income["IncomeRealAfterTax"].max(),
+            df_income["ExpensesReal"].max(),
+            df_income["InvestableRealAnnual"].max(),
+        )
+        y_max_inc = y_max_inc * 1.1 if y_max_inc > 0 else 1.0
+
         fig_inc.update_layout(
             title=dict(
                 text="Income, expenses, and investable cash over time (real, after tax)",
@@ -1516,7 +1566,7 @@ def main():
             ),
             xaxis_title="Age (years)",
             yaxis_title="Amount per year ($, real)",
-            yaxis_tickprefix="$",
+            yaxis=dict(range=[0, y_max_inc], tickprefix="$"),
             margin=dict(l=40, r=40, t=60, b=40),
             legend=dict(
                 orientation="h",
