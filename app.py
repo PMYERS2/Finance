@@ -160,17 +160,24 @@ def compute_barista_fi_age_bridge(
     barista_start_age,
     barista_end_age,
     full_fi_age,
+    tax_rate_bridge=0.0,
+    extra_health_today=0.0,
 ):
     """
     Model A: bridge-to-FI at full_fi_age using a fixed SWR (Option A).
 
     Logic:
       - Contributions stop at barista start age.
-      - From barista_start_age to barista_end_age, portfolio funds (S - B) each year.
-      - From barista_end_age to full_fi_age, portfolio funds full S each year.
+      - From barista_start_age to barista_end_age:
+          portfolio funds (S - B) + extra_health_today, grossed up for tax.
+      - From barista_end_age to full_fi_age:
+          portfolio funds S + extra_health_today, grossed up for tax.
       - All calculations are in real (today's) dollars.
       - At full_fi_age, portfolio must be >= S / base_30yr_swr.
       - Additionally, portfolio must not go negative at any point during the bridge.
+
+    tax_rate_bridge: effective tax rate on portfolio withdrawals during the bridge (0–1).
+    extra_health_today: extra annual health insurance cost (today's $) while off employer plan.
 
     Returns:
       (barista_age, balance_at_barista_start_real, balance_at_full_fi_real,
@@ -182,6 +189,9 @@ def compute_barista_fi_age_bridge(
 
     if S <= 0 or base_30yr_swr <= 0:
         return None, None, None, None, None
+
+    # Clamp tax rate to [0, 0.7] just to avoid nonsense inputs
+    t = max(0.0, min(tax_rate_bridge, 0.7))
 
     # Work in real dollars
     if infl_rate > 0:
@@ -231,12 +241,22 @@ def compute_barista_fi_age_bridge(
 
         # Simulate year-by-year in real terms from age0 to full_fi_age
         for age in range(age0, full_fi_age):
+            # Base spend that must be funded from portfolio (in today's $)
             if age <= effective_barista_end_age:
-                draw = max(S - B, 0.0)
+                spend_from_portfolio = max(S - B, 0.0)
             else:
-                draw = S
+                spend_from_portfolio = S
 
-            bal -= draw
+            # Add extra health insurance cost while bridging
+            total_real_spend = spend_from_portfolio + max(extra_health_today, 0.0)
+
+            # Gross up for taxes on withdrawals
+            if t > 0:
+                gross_withdrawal = total_real_spend / (1 - t)
+            else:
+                gross_withdrawal = total_real_spend
+
+            bal -= gross_withdrawal
             if bal < 0:
                 ok = False
                 break
@@ -857,6 +877,8 @@ def main():
         barista_income_today = 0.0
         barista_start_age = None
         barista_end_age = 65
+        barista_tax_rate_bridge = 0.0
+        extra_health_today = 0.0
 
         if use_barista:
             barista_income_today = st.number_input(
@@ -866,6 +888,25 @@ def main():
                 min_value=0,
                 key="barista_income",
             )
+
+            # Extra health insurance while off employer plan
+            extra_health_today = st.number_input(
+                "Extra health insurance cost during bridge ($/yr, today's)",
+                value=0,
+                step=1000,
+                min_value=0,
+                key="barista_health",
+            )
+
+            # Effective tax rate on portfolio withdrawals during the bridge
+            barista_tax_rate_bridge = st.number_input(
+                "Effective tax rate on portfolio withdrawals during bridge (%)",
+                value=0.0,
+                min_value=0.0,
+                max_value=70.0,
+                step=1.0,
+                key="barista_tax_rate",
+            ) / 100.0
 
             # Clamp default end age into [current_age+1, retirement_age]
             min_end_age = current_age + 1
@@ -939,6 +980,8 @@ def main():
                 barista_start_age=barista_start_age,
                 barista_end_age=barista_end_age,
                 full_fi_age=retirement_age,
+                tax_rate_bridge=barista_tax_rate_bridge,
+                extra_health_today=extra_health_today,
             )
 
         # ---------------- Render FI card -------------------
@@ -955,11 +998,15 @@ def main():
                     f"age {barista_age} with ${barista_income_today:,.0f}/yr until age {barista_end_age}, "
                     f"and still reach a {base_swr_30yr*100:.1f}% FI target of "
                     f"${barista_fi_target_real:,.0f} by age {retirement_age} "
-                    f"(projected portfolio at that age: ${barista_fi_balance_real:,.0f})."
+                    f"(projected portfolio at that age: ${barista_fi_balance_real:,.0f}). "
+                    f"Bridge includes +${extra_health_today:,.0f}/yr health costs and "
+                    f"{barista_tax_rate_bridge*100:.0f}% tax on portfolio withdrawals."
                 )
             elif use_barista:
                 barista_line = (
-                    f"Barista FI bridge model with ${barista_income_today:,.0f}/yr until age {barista_end_age}: "
+                    f"Barista FI bridge model with ${barista_income_today:,.0f}/yr until age {barista_end_age}, "
+                    f"+${extra_health_today:,.0f}/yr health, and "
+                    f"{barista_tax_rate_bridge*100:.0f}% tax on withdrawals: "
                     "not reached under these assumptions (cannot bridge to the FI target by retirement age)."
                 )
             else:
@@ -1103,10 +1150,12 @@ def main():
 
         if use_barista and barista_start_age is not None:
             assumptions.append(
-                f"- Barista FIRE (bridge model): assumes contributions stop and part-time income of "
-                f"`{barista_income_today:,.0f}`/year from age {barista_start_age} to {barista_end_age}. "
-                f"The calculator finds the earliest age you can switch to part-time and still be on track "
-                f"to hit a {base_swr_30yr*100:.1f}% FI target by age {retirement_age}."
+                f"- Barista FIRE (bridge model): contributions stop at barista start age, "
+                f"part-time income of `${barista_income_today:,.0f}`/year from age {barista_start_age} "
+                f"to {barista_end_age}, extra health cost `${extra_health_today:,.0f}`/year during bridge, "
+                f"and an effective tax rate of {barista_tax_rate_bridge*100:.0f}% on portfolio withdrawals. "
+                f"The model checks whether you can bridge to a {base_swr_30yr*100:.1f}% FI target "
+                f"by age {retirement_age} without the portfolio going negative."
             )
 
         if assumptions:
