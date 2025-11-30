@@ -102,42 +102,60 @@ def adjusted_swr_for_horizon(horizon_years, base_30yr_swr=0.04):
     return max(0.025, min(0.05, raw))
 
 
-def compute_fi_age(df, fi_annual_spend_today, infl_rate, show_real, swr):
+def compute_fi_age_horizon(
+    df,
+    fi_annual_spend_today,
+    infl_rate,
+    show_real,
+    base_30yr_swr,
+    horizon_end_age=90,
+):
     """
-    Compute FI age for a given SWR using investment portfolio ONLY (Balance).
-    Home equity is intentionally ignored here.
+    FI age with horizon-aware SWR.
 
-    Returns (fi_age, fi_portfolio, fi_required) or (None, None, None).
+    Scans each age, computes horizon-specific SWR and required portfolio,
+    and returns the earliest age where Balance >= required.
+
+    Returns (fi_age, fi_portfolio, fi_required, eff_swr, horizon_years)
+    or (None, None, None, None, None) if FI not reached.
     """
-    if swr <= 0 or fi_annual_spend_today <= 0:
-        return None, None, None
-
-    fi_multiple = 1.0 / swr
-
-    if show_real and infl_rate > 0:
-        required_by_year = [
-            fi_annual_spend_today * fi_multiple for _ in df["Year"]
-        ]
-    else:
-        required_by_year = [
-            fi_annual_spend_today * ((1 + infl_rate) ** year) * fi_multiple
-            for year in df["Year"]
-        ]
+    if fi_annual_spend_today <= 0 or base_30yr_swr <= 0:
+        return None, None, None, None, None
 
     fi_age = None
     fi_portfolio = None
     fi_required = None
+    eff_swr = None
+    horizon_years = None
 
-    for age, year, pv, req in zip(
-        df["Age"], df["Year"], df["Balance"], required_by_year
-    ):
-        if pv >= req:
+    for row in df.itertuples():
+        age = row.Age
+        year = row.Year
+        balance = row.Balance
+
+        if age >= horizon_end_age:
+            continue
+
+        T = max(horizon_end_age - age, 1)
+        swr = adjusted_swr_for_horizon(T, base_30yr_swr=base_30yr_swr)
+        multiple = 1.0 / swr
+
+        if show_real and infl_rate > 0:
+            # Everything already in today's dollars -> no inflation factor
+            required = fi_annual_spend_today * multiple
+        else:
+            # Nominal path -> inflate spending to year t
+            required = fi_annual_spend_today * ((1 + infl_rate) ** year) * multiple
+
+        if balance >= required:
             fi_age = int(age)
-            fi_portfolio = pv
-            fi_required = req
+            fi_portfolio = balance
+            fi_required = required
+            eff_swr = swr
+            horizon_years = T
             break
 
-    return fi_age, fi_portfolio, fi_required
+    return fi_age, fi_portfolio, fi_required, eff_swr, horizon_years
 
 
 # =========================================================
@@ -470,8 +488,11 @@ monthly_contrib_by_year_full = []
 for y in range(years_full):
     age = current_age + y
     if age < retirement_age:
-        # contributions grow above inflation and then are inflated
-        val = monthly_contrib_base_today * (1 + contrib_growth_rate) ** y * (1 + infl_rate) ** y
+        val = (
+            monthly_contrib_base_today
+            * (1 + contrib_growth_rate) ** y
+            * (1 + infl_rate) ** y
+        )
     else:
         val = 0.0
     monthly_contrib_by_year_full.append(val)
@@ -672,7 +693,7 @@ if show_real and infl_rate > 0:
 
     for idx in range(len(df_full)):
         c = df_full.loc[idx, "ContribYear"]
-        e = df_full.loc[idx, "AnnualExpense"]
+        e = df_full.loc(idx, "AnnualExpense") if False else df_full.loc[idx, "AnnualExpense"]
 
         cum_contrib_real += c
         cum_expense_drag_real += -e
@@ -765,45 +786,17 @@ with fi_col:
             key="barista_start_age",
         )
 
-    # ---------------- FI age (base + horizon-aware SWR, but fixed age) -------------
-    fi_age = None
-    fi_portfolio = None
-    fi_required = None
-    effective_swr = None
-    horizon_years = None
-
-    if fi_annual_spend_today > 0 and base_swr_30yr > 0:
-        # first, earliest FI age with base 30-yr SWR, using full horizon df
-        fi_age0, _, _ = compute_fi_age(
-            df_full, fi_annual_spend_today, infl_rate, show_real, base_swr_30yr
+    # -------- FI age (horizon-aware SWR, single pass over df_full) --------
+    fi_age, fi_portfolio, fi_required, effective_swr, horizon_years = (
+        compute_fi_age_horizon(
+            df_full,
+            fi_annual_spend_today,
+            infl_rate,
+            show_real,
+            base_swr_30yr,
+            horizon_end_age=max_sim_age,
         )
-
-        if fi_age0 is not None:
-            row0 = df_full.loc[df_full["Age"] == fi_age0]
-            if not row0.empty:
-                row0 = row0.iloc[0]
-                year0 = row0["Year"]
-                balance0 = row0["Balance"]
-
-                horizon_years = max(max_sim_age - fi_age0, 1)
-                effective_swr = adjusted_swr_for_horizon(
-                    horizon_years, base_30yr_swr=base_swr_30yr
-                )
-                multiple_eff = 1.0 / effective_swr
-
-                if show_real and infl_rate > 0:
-                    fi_required = fi_annual_spend_today * multiple_eff
-                else:
-                    fi_required = (
-                        fi_annual_spend_today * ((1 + infl_rate) ** year0) * multiple_eff
-                    )
-
-                if balance0 >= fi_required:
-                    fi_age = fi_age0
-                    fi_portfolio = balance0
-                else:
-                    fi_age = None
-                    fi_portfolio = None
+    )
 
     # ---------------- Barista FI (horizon-aware, using full df) --------------------
     barista_age = None
@@ -872,7 +865,9 @@ with fi_col:
     if fi_age is not None:
         if effective_swr is None:
             effective_swr = base_swr_30yr
-            horizon_years = max(max_sim_age - fi_age, 1) if horizon_years is None else horizon_years
+            horizon_years = (
+                max(max_sim_age - fi_age, 1) if horizon_years is None else horizon_years
+            )
 
         if use_barista and barista_age is not None:
             barista_line = (
@@ -1149,7 +1144,11 @@ with main_left:
         monthly_contrib_by_year_extra = []
         for y in range(years_extra):
             age = current_age + y
-            base_c = monthly_contrib_base_today * (1 + contrib_growth_rate) ** y * (1 + infl_rate) ** y
+            base_c = (
+                monthly_contrib_base_today
+                * (1 + contrib_growth_rate) ** y
+                * (1 + infl_rate) ** y
+            )
             if age < retirement_age:
                 c = base_c + extra_per_month * (1 + infl_rate) ** y
             else:
