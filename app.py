@@ -750,17 +750,17 @@ with fi_col:
             f"""
             <div style="background-color:#E5E5E5; padding:30px 20px; border-radius:12px;
                         text-align:center; margin-bottom:20px; border:1px solid #333;">
-              <div style="font-size:20px; color:#bbbbbb; margin-bottom:4px;">
+              <div style="font-size:20px; color:#2F2F2F; margin-bottom:4px;">
                 Financial independence age
               </div>
-              <div style="font-size:72px; font-weight:700; color:#ffffff; line-height:1.05;">
+              <div style="font-size:72px; font-weight:700; color:#2F2F2F; line-height:1.05;">
                 {fi_age}
               </div>
-              <div style="font-size:16px; color:#bbbbbb; margin-top:14px;">
+              <div style="font-size:16px; color:#2F2F2F; margin-top:14px;">
                 FI target: ${fi_required:,.0f} &bull;
                 Portfolio at FI: ${fi_portfolio:,.0f}
               </div>
-              <div style="font-size:14px; color:#888888; margin-top:6px;">
+              <div style="font-size:14px; color:#2F2F2F; margin-top:6px;">
                 Effective SWR: {effective_swr*100:.2f}% &bull;
                 Horizon: ~{horizon_years:.0f} years (to age 90)<br>
                 Base 30-year SWR input: {base_swr_30yr*100:.2f}%
