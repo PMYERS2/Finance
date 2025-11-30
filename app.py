@@ -712,7 +712,7 @@ with fi_col:
 
     # Barista FIRE controls
     use_barista = st.checkbox(
-        "Show Barista FIRE scenario (part-time income in FI)",
+        "Show Part-Time income in FI)",
         value=False,
         key="barista_toggle",
     )
@@ -943,9 +943,9 @@ with main_left:
         st.markdown("\n".join(assumptions))
 
     # Chart: Net contributions + investment growth + home equity
-    color_net_contrib = "#5BA68E"
-    color_invest_growth = "#D9A441"
-    color_home = "#4C6E91"
+    color_net_contrib = "#C8A77A"
+    color_invest_growth = "#3A6EA5"
+    color_home = "#A7ADB2"
 
     fig = go.Figure()
     fig.add_trace(
@@ -1132,3 +1132,4 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
+
