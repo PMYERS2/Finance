@@ -1,10 +1,13 @@
-import streamlit as st
+import textwrap
+
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 
-# -----------------------------
+
+# =========================================================
 # Core compound interest logic
-# -----------------------------
+# =========================================================
 def compound_schedule(
     start_balance,
     annual_rate,
@@ -86,9 +89,9 @@ def compound_schedule(
     return pd.DataFrame(rows)
 
 
-# -----------------------------
+# =========================================================
 # FI helper functions
-# -----------------------------
+# =========================================================
 def adjusted_swr_for_horizon(horizon_years, base_30yr_swr=0.04):
     """
     Adjust SWR downward for longer horizons, upward (slightly) for shorter.
@@ -103,6 +106,7 @@ def compute_fi_age(df, fi_annual_spend_today, infl_rate, show_real, swr):
     """
     Compute FI age for a given SWR using investment portfolio ONLY (Balance).
     Home equity is intentionally ignored here.
+
     Returns (fi_age, fi_portfolio, fi_required) or (None, None, None).
     """
     if swr <= 0 or fi_annual_spend_today <= 0:
@@ -136,15 +140,19 @@ def compute_fi_age(df, fi_annual_spend_today, infl_rate, show_real, swr):
     return fi_age, fi_portfolio, fi_required
 
 
-# -----------------------------
+# =========================================================
 # Page setup
-# -----------------------------
-st.set_page_config(page_title="Compound Interest Calculator", layout="wide")
-st.title("Compound Interest Calculator")
+# =========================================================
+st.set_page_config(
+    page_title="Personal FI Planner",
+    layout="wide",
+)
 
-# -----------------------------
+st.title("Personal FI Planner")
+
+# =========================================================
 # SIDEBAR: Core inputs
-# -----------------------------
+# =========================================================
 st.sidebar.header("Core inputs")
 
 current_age = st.sidebar.number_input(
@@ -224,18 +232,19 @@ show_real = st.sidebar.checkbox(
     value=True,
 )
 
-# -----------------------------
+# =========================================================
 # SIDEBAR: Additional customization
-# -----------------------------
+# =========================================================
 st.sidebar.markdown("---")
 st.sidebar.subheader("Additional customization")
 
-# ---- Home (first section under Additional customization) ----
+# -----------------------------
+# Home (first section)
+# -----------------------------
 st.sidebar.subheader("Home")
 
 include_home = st.sidebar.checkbox("Include home in plan", key="home_toggle")
 
-# Rent + property tax / insurance inputs
 current_rent = st.sidebar.number_input(
     "Current rent ($/month – only needed if buying or upgrading home)",
     value=1100,
@@ -369,7 +378,9 @@ if include_home:
             key="mort_term",
         )
 
-# ---- Future expenses (kids + cars) ----
+# -----------------------------
+# Future expenses (kids + cars)
+# -----------------------------
 st.sidebar.markdown("---")
 st.sidebar.subheader("Future expenses (today's $)")
 
@@ -444,9 +455,9 @@ if use_car_expenses:
 else:
     car_cost_today = first_car_age = car_interval_years = None
 
-# -----------------------------
+# =========================================================
 # Build per-year contribution and expense schedules (nominal)
-# -----------------------------
+# =========================================================
 monthly_contrib_by_year = [
     monthly_contrib_base_today * (1 + contrib_growth_rate) ** y * (1 + infl_rate) ** y
     for y in range(years)
@@ -579,9 +590,7 @@ if include_home:
             else:
                 annual_expense_by_year_nominal[purchase_idx] += down_payment_nominal
 
-# -----------------------------
 # Housing cost delta: (mortgage + property tax) vs current rent
-# -----------------------------
 housing_adj_by_year = [0.0 for _ in range(years)]
 
 if (
@@ -599,9 +608,9 @@ if (
 for y in range(years):
     annual_expense_by_year_nominal[y] += housing_adj_by_year[y]
 
-# -----------------------------
+# =========================================================
 # Base scenario (nominal)
-# -----------------------------
+# =========================================================
 df = compound_schedule(
     start_balance=start_balance_effective,
     annual_rate=annual_rate,
@@ -619,9 +628,9 @@ df["HousingDelta"] = housing_adj_by_year
 # Net contributions (nominal)
 df["NetContributions"] = df["CumContributions"] + df["ExpenseDrag"]
 
-# -----------------------------
+# =========================================================
 # Real-dollar adjustment
-# -----------------------------
+# =========================================================
 if show_real and infl_rate > 0:
     df["DF_end"] = (1 + infl_rate) ** df["Year"]
     df["DF_mid"] = (1 + infl_rate) ** (df["Year"] - 1)
@@ -668,9 +677,9 @@ ending_invest_balance = df["Balance"].iloc[-1]
 
 label_suffix = " (today's dollars)" if show_real and infl_rate > 0 else " (nominal)"
 
-# -----------------------------
-# MAIN LAYOUT: left = chart etc., right = FI card
-# -----------------------------
+# =========================================================
+# MAIN LAYOUT: left = chart etc., right = FI KPI card
+# =========================================================
 main_left, fi_col = st.columns([4, 2])
 
 # -----------------------------
@@ -697,7 +706,7 @@ with fi_col:
     ) / 100.0
 
     st.caption(
-        "This is your '4% rule' style input. The planner auto-adjusts the actual "
+        "This is the '4% rule' style input. The planner auto-adjusts the actual "
         "withdrawal rate based on how many years remain until age 90."
     )
 
@@ -737,16 +746,44 @@ with fi_col:
                 effective_swr = swr0
 
     if fi_age is not None:
-        st.metric("Financial independence age", f"{fi_age}")
-        st.caption(
-            f"At age {fi_age}: portfolio ≈ ${fi_portfolio:,.0f}; "
-            f"FI target ≈ ${fi_required:,.0f}. "
-            f"Effective withdrawal rate ≈ {effective_swr*100:.2f}% "
-            f"for ~{horizon_years:.0f} years (to age 90; "
-            f"base 30-year SWR input: {base_swr_30yr*100:.2f}%)."
+        fi_card_html = textwrap.dedent(
+            f"""
+            <div style="background-color:#111; padding:30px 20px; border-radius:12px;
+                        text-align:center; margin-bottom:20px; border:1px solid #333;">
+              <div style="font-size:20px; color:#bbbbbb; margin-bottom:4px;">
+                Financial independence age
+              </div>
+              <div style="font-size:72px; font-weight:700; color:#ffffff; line-height:1.05;">
+                {fi_age}
+              </div>
+              <div style="font-size:16px; color:#bbbbbb; margin-top:14px;">
+                FI target: ${fi_required:,.0f} &bull;
+                Portfolio at FI: ${fi_portfolio:,.0f}
+              </div>
+              <div style="font-size:14px; color:#888888; margin-top:6px;">
+                Effective SWR: {effective_swr*100:.2f}% &bull;
+                Horizon: ~{horizon_years:.0f} years (to age 90)<br>
+                Base 30-year SWR input: {base_swr_30yr*100:.2f}%
+              </div>
+            </div>
+            """
         )
+        st.markdown(fi_card_html, unsafe_allow_html=True)
     else:
-        st.metric("Financial independence age", "Not reached")
+        fi_card_html = textwrap.dedent(
+            """
+            <div style="background-color:#111; padding:24px 20px; border-radius:12px;
+                        text-align:center; margin-bottom:16px; border:1px solid #333;">
+              <div style="font-size:18px; color:#bbbbbb; margin-bottom:6px;">
+                Financial independence age
+              </div>
+              <div style="font-size:32px; font-weight:600; color:#ff6b6b;">
+                Not reached
+              </div>
+            </div>
+            """
+        )
+        st.markdown(fi_card_html, unsafe_allow_html=True)
         st.caption(
             "With the current assumptions and horizon-aware withdrawal rate, "
             "FI is not reached before your retirement age."
@@ -824,6 +861,7 @@ with main_left:
     color_invest_growth = "#3A6EA5"
     color_home = "#A7ADB2"
 
+
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
@@ -861,37 +899,30 @@ with main_left:
     tickvals = sorted(set(tickvals))
     ticktext = [str(a) for a in tickvals]
 
-    last_age = df["Age"].iloc[-1]
-    last_bar_height = (
-        df["NetContributions"].iloc[-1]
-        + df["InvestGrowth"].iloc[-1]
-        + df["HomeEquity"].iloc[-1]
-    )
-
     fig.update_layout(
         barmode="stack",
         title=dict(
-            text="Net contributions + investment growth + home equity over time",
+            text="Decomposition of net worth over time",
             x=0.5,
             xanchor="center",
-            font=dict(size=22, color="black"),
+            font=dict(size=18),
         ),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=40, r=40, t=60, b=60),
         xaxis=dict(
-            title=dict(text="Age (years)", font=dict(color="black", size=14)),
-            tickfont=dict(color="black", size=12),
+            title=dict(text="Age (years)", font=dict(size=14)),
+            tickfont=dict(size=12),
             showgrid=False,
             tickmode="array",
             tickvals=tickvals,
             ticktext=ticktext,
         ),
         yaxis=dict(
-            title=dict(text="Amount ($)", font=dict(color="black", size=14)),
-            tickfont=dict(color="black", size=12),
+            title=dict(text="Amount ($)", font=dict(size=14)),
+            tickfont=dict(size=12),
             showgrid=True,
-            gridcolor="#e5e5e5",
+            gridcolor="#444444",
             tickprefix="$",
             tickformat=",.0f",
             separatethousands=True,
@@ -901,32 +932,35 @@ with main_left:
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.02,
+            y=.98,
             xanchor="center",
             x=0.5,
-            font=dict(color="black", size=12),
+            font=dict(size=12),
         ),
     )
 
+    # minimal annotation on last bar
+    last_age = df["Age"].iloc[-1]
+    last_bar_height = (
+        df["NetContributions"].iloc[-1]
+        + df["InvestGrowth"].iloc[-1]
+        + df["HomeEquity"].iloc[-1]
+    )
+    max_bar_height = (
+    df["NetContributions"] + df["InvestGrowth"] + df["HomeEquity"]).max()
+    label_y = last_bar_height + max_bar_height * 0.03  # 3% above bar
     fig.add_annotation(
         x=last_age,
-        y=last_bar_height,
-        text=f"<b>${ending_net_worth:,.0f}</b>",
-        showarrow=True,
-        arrowhead=2,
-        ax=0,
-        ay=-40,
-        font=dict(color="black", size=12),
-        bgcolor="rgba(255,255,255,0.85)",
-        bordercolor="black",
-        borderwidth=1,
+        y=label_y,
+        text=f"${ending_net_worth:,.0f}",
+        showarrow=False,
+        font=dict(size=11, color="white"),
+        bgcolor="rgba(0,0,0,0.35)",
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # -----------------------------
     # Scenario: What if you saved more (or less)?
-    # -----------------------------
     st.markdown("### What if you saved more (or less)?")
 
     extra_per_month = st.number_input(
@@ -971,14 +1005,12 @@ with main_left:
     else:
         st.caption("Set a non-zero amount to see the impact on ending net worth.")
 
-    # -----------------------------
-    # Table
-    # -----------------------------
+    # Age-by-age table
     st.markdown("### Age-by-age breakdown")
 
     display_df = df.copy()
     display_df["InvestmentValue"] = display_df["Balance"]
-    display_df["Home Value"] = display_df["HomePrice"]        # actual home value
+    display_df["Home Value"] = display_df["HomePrice"]
     display_df["Home Equity"] = display_df["HomeEquity"]
     display_df["Contributions"] = display_df["ContribYear"]
     display_df["AdditionalAnnualExpense"] = display_df["AnnualExpense"]
