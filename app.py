@@ -964,7 +964,7 @@ with main_left:
     color_home = "#A7ADB2"
 
     # ----- Highlight first year where NetWorth >= 1M by recoloring that bar -----
-    highlight_color = "#FFD700"  # gold
+    highlight_color = "#CCAA00"  # gold
 
     highlight_mask = df["NetWorth"] >= 1_000_000
     if highlight_mask.any():
@@ -1171,3 +1171,4 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
+
