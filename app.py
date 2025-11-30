@@ -963,13 +963,36 @@ with main_left:
     color_invest_growth = "#3A6EA5"
     color_home = "#A7ADB2"
 
+    # ----- Highlight first year where NetWorth >= 1M by recoloring that bar -----
+    highlight_color = "#FFD700"  # gold
+
+    highlight_mask = df["NetWorth"] >= 1_000_000
+    if highlight_mask.any():
+        first_million_index = highlight_mask.idxmax()
+    else:
+        first_million_index = None
+
+    # Build per-row marker colors
+    net_colors = []
+    growth_colors = []
+    home_colors = []
+    for idx in df.index:
+        if first_million_index is not None and idx == first_million_index:
+            net_colors.append(highlight_color)
+            growth_colors.append(highlight_color)
+            home_colors.append(highlight_color)
+        else:
+            net_colors.append(color_net_contrib)
+            growth_colors.append(color_invest_growth)
+            home_colors.append(color_home)
+
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
             x=df["Age"],
             y=df["NetContributions"],
             name="Net contributions (after expenses)",
-            marker_color=color_net_contrib,
+            marker_color=net_colors,
             hovertemplate="Age %{x}<br>Net contributions: $%{y:,.0f}<extra></extra>",
         )
     )
@@ -978,7 +1001,7 @@ with main_left:
             x=df["Age"],
             y=df["InvestGrowth"],
             name="Investment growth (cumulative)",
-            marker_color=color_invest_growth,
+            marker_color=growth_colors,
             hovertemplate="Age %{x}<br>Investment growth: $%{y:,.0f}<extra></extra>",
         )
     )
@@ -987,7 +1010,7 @@ with main_left:
             x=df["Age"],
             y=df["HomeEquity"],
             name="Home equity",
-            marker_color=color_home,
+            marker_color=home_colors,
             hovertemplate="Age %{x}<br>Home equity: $%{y:,.0f}<extra></extra>",
         )
     )
@@ -1014,17 +1037,21 @@ with main_left:
         margin=dict(l=40, r=40, t=60, b=60),
         xaxis=dict(
             title=dict(text="Age (years)", font=dict(size=14)),
-            tickfont=dict(size=12),
+            tickfont=dict(size=12, color="#777777"),
             showgrid=False,
+            showline=True,
+            linecolor="#777777",
             tickmode="array",
             tickvals=tickvals,
             ticktext=ticktext,
         ),
         yaxis=dict(
             title=dict(text="Amount ($)", font=dict(size=14)),
-            tickfont=dict(size=12),
+            tickfont=dict(size=12, color="#777777"),
             showgrid=True,
             gridcolor="#E0E0E0",
+            showline=True,
+            linecolor="#777777",
             tickprefix="$",
             tickformat=",.0f",
             separatethousands=True,
@@ -1051,12 +1078,12 @@ with main_left:
     label_y = last_bar_height + max_bar_height * 0.03  # 3% above bar
 
     fig.add_annotation(
-    x=last_age,
-    y=label_y,
-    text=f"${ending_net_worth:,.0f}",
-    showarrow=False,
-    font=dict(size=14, color="black",weight="bold"),
-)
+        x=last_age,
+        y=label_y,
+        text=f"<b>${ending_net_worth:,.0f}</b>",
+        showarrow=False,
+        font=dict(size=14, color="black", family="Arial"),
+    )
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -1144,6 +1171,3 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
-
-
-
