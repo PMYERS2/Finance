@@ -748,7 +748,7 @@ with fi_col:
     if fi_age is not None:
         fi_card_html = textwrap.dedent(
             f"""
-            <div style="background-color:#2E2E2E; padding:30px 20px; border-radius:12px;
+            <div style="background-color:#E5E5E5; padding:30px 20px; border-radius:12px;
                         text-align:center; margin-bottom:20px; border:1px solid #333;">
               <div style="font-size:20px; color:#bbbbbb; margin-bottom:4px;">
                 Financial independence age
