@@ -1055,7 +1055,7 @@ with main_left:
     y=label_y,
     text=f"${ending_net_worth:,.0f}",
     showarrow=False,
-    font=dict(size=14, color="black", family="Arial"),
+    font=dict(size=14, color="black",weight="bold"),
 )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -1144,6 +1144,7 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
+
 
 
 
