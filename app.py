@@ -712,7 +712,7 @@ with fi_col:
 
     # Barista FIRE controls
     use_barista = st.checkbox(
-        "Show Part-Time income in FI)",
+        "Show Part-Time income in FI",
         value=False,
         key="barista_toggle",
     )
@@ -1132,4 +1132,5 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
+
 
