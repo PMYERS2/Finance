@@ -115,12 +115,10 @@ def compute_fi_age(df, fi_annual_spend_today, infl_rate, show_real, swr):
     fi_multiple = 1.0 / swr
 
     if show_real and infl_rate > 0:
-        # Real mode: portfolio and spending already in today's dollars
         required_by_year = [
             fi_annual_spend_today * fi_multiple for _ in df["Year"]
         ]
     else:
-        # Nominal mode: grow spending with inflation
         required_by_year = [
             fi_annual_spend_today * ((1 + infl_rate) ** year) * fi_multiple
             for year in df["Year"]
@@ -165,7 +163,7 @@ current_age = st.sidebar.number_input(
     step=1,
 )
 
-retirement_age = st.sidebar.number_input(
+retirement_age_input = st.sidebar.number_input(
     "Retirement age (years)",
     value=60,
     min_value=1,
@@ -173,9 +171,15 @@ retirement_age = st.sidebar.number_input(
     step=1,
 )
 
-years = retirement_age - current_age
-if years <= 0:
-    st.error("Retirement age must be greater than current age.")
+# FI simulation will always run to age 90
+max_sim_age = 90
+
+# Effective retirement age cannot exceed simulation end
+retirement_age = min(retirement_age_input, max_sim_age)
+
+years_plot = retirement_age - current_age
+if years_plot <= 0:
+    st.error("Retirement age must be greater than current age and below the FI horizon (90).")
     st.stop()
 
 start_balance_input = st.sidebar.number_input(
@@ -189,7 +193,7 @@ annual_rate = st.sidebar.slider(
     "Annual rate of return (%/yr)",
     min_value=0.0,
     max_value=20.0,
-    value=10.0,   # base 10%
+    value=10.0,
     step=0.5,
 ) / 100.0
 
@@ -201,7 +205,7 @@ contrib_frequency = st.sidebar.radio(
 
 contrib_amount = st.sidebar.number_input(
     f"{contrib_frequency} contribution amount ($)",
-    value=1000,   # base $1,000
+    value=1000,
     step=100,
     min_value=0,
 )
@@ -351,7 +355,7 @@ if include_home:
             "Planned purchase age (years)",
             value=current_age,
             min_value=current_age,
-            max_value=retirement_age,
+            max_value=max_sim_age,
             step=1,
             key="purchase_age",
         )
@@ -458,40 +462,53 @@ else:
     car_cost_today = first_car_age = car_interval_years = None
 
 # =========================================================
-# Build per-year contribution and expense schedules (nominal)
+# Build per-year contribution and expense schedules (full horizon to 90)
 # =========================================================
-monthly_contrib_by_year = [
-    monthly_contrib_base_today * (1 + contrib_growth_rate) ** y * (1 + infl_rate) ** y
-    for y in range(years)
-]
+years_full = max_sim_age - current_age  # full FI simulation horizon
 
-annual_expense_by_year_nominal = [0.0 for _ in range(years)]
+monthly_contrib_by_year_full = []
+for y in range(years_full):
+    age = current_age + y
+    if age < retirement_age:
+        # contributions grow above inflation and then are inflated
+        val = monthly_contrib_base_today * (1 + contrib_growth_rate) ** y * (1 + infl_rate) ** y
+    else:
+        val = 0.0
+    monthly_contrib_by_year_full.append(val)
 
-# Home arrays
-home_price_by_year = [0.0 for _ in range(years)]   # market price
-home_equity_by_year = [0.0 for _ in range(years)]  # equity that counts to net worth
+annual_expense_by_year_nominal_full = [0.0 for _ in range(years_full)]
+
+# Home arrays for full horizon
+home_price_by_year_full = [0.0 for _ in range(years_full)]   # market price
+home_equity_by_year_full = [0.0 for _ in range(years_full)]  # equity
+housing_adj_by_year_full = [0.0 for _ in range(years_full)]  # mortgage vs rent delta
 
 # Start balance (may be hit by an immediate down payment)
 start_balance_effective = start_balance_input
 
 # Kid expenses
-for year_idx in range(years):
+for year_idx in range(years_full):
     age_end_of_year = current_age + year_idx + 1
     if use_kid_expenses:
         if kids_start_age <= age_end_of_year <= kids_end_age:
             expense_real = num_kids * annual_cost_per_kid_today
             expense_nominal = expense_real * ((1 + infl_rate) ** (year_idx + 1))
-            annual_expense_by_year_nominal[year_idx] += expense_nominal
+            annual_expense_by_year_nominal_full[year_idx] += expense_nominal
 
 # Car expenses
-for year_idx in range(years):
+for year_idx in range(years_full):
     age_end_of_year = current_age + year_idx + 1
-    if use_car_expenses and car_interval_years and car_interval_years > 0:
+    if (
+        use_car_expenses
+        and car_interval_years
+        and car_interval_years > 0
+        and first_car_age is not None
+    ):
         if age_end_of_year >= first_car_age:
             if (age_end_of_year - first_car_age) % car_interval_years == 0:
                 expense_real = car_cost_today
                 expense_nominal = expense_real * ((1 + infl_rate) ** (year_idx + 1))
-                annual_expense_by_year_nominal[year_idx] += expense_nominal
+                annual_expense_by_year_nominal_full[year_idx] += expense_nominal
 
 # Home: equity, maintenance, and possible down payment
 if include_home:
@@ -501,7 +518,6 @@ if include_home:
 
         outstanding_now = max(base_price_today - equity_amount_now, 0.0)
         loan_amount = outstanding_now
-        years_until_purchase = 0
 
         if years_remaining_loan > 0 and loan_amount > 0:
             r_m = mortgage_rate / 12.0
@@ -539,23 +555,23 @@ if include_home:
             r_m = 0.0
             n_payments = 0
 
-    for year_idx in range(years):
+    for year_idx in range(years_full):
         years_from_now = year_idx + 1
         price_nominal = base_price_today * ((1 + home_app_rate) ** years_from_now)
 
         if year_idx >= purchase_idx:
-            home_price_by_year[year_idx] = price_nominal
+            home_price_by_year_full[year_idx] = price_nominal
         else:
-            home_price_by_year[year_idx] = 0.0
+            home_price_by_year_full[year_idx] = 0.0
 
         if loan_amount <= 0 or n_payments == 0:
             if year_idx >= purchase_idx:
-                home_equity_by_year[year_idx] = price_nominal
+                home_equity_by_year_full[year_idx] = price_nominal
             else:
-                home_equity_by_year[year_idx] = 0.0
+                home_equity_by_year_full[year_idx] = 0.0
         else:
             if year_idx < purchase_idx:
-                home_equity_by_year[year_idx] = 0.0
+                home_equity_by_year_full[year_idx] = 0.0
             else:
                 years_since_purchase = year_idx - purchase_idx + 1
                 k = min(years_since_purchase * 12, n_payments)
@@ -575,14 +591,14 @@ if include_home:
                     outstanding = 0.0
 
                 equity = max(price_nominal - outstanding, 0.0)
-                home_equity_by_year[year_idx] = equity
+                home_equity_by_year_full[year_idx] = equity
 
         if year_idx >= purchase_idx:
             maint_nominal = price_nominal * maintenance_pct
-            annual_expense_by_year_nominal[year_idx] += maint_nominal
+            annual_expense_by_year_nominal_full[year_idx] += maint_nominal
 
     if home_status == "I plan to buy":
-        if purchase_idx < years:
+        if purchase_idx < years_full:
             down_payment_nominal = purchase_price_nominal * down_payment_pct
 
             if planned_purchase_age == current_age:
@@ -590,52 +606,50 @@ if include_home:
                     0.0, start_balance_effective - down_payment_nominal
                 )
             else:
-                annual_expense_by_year_nominal[purchase_idx] += down_payment_nominal
+                annual_expense_by_year_nominal_full[purchase_idx] += down_payment_nominal
 
 # Housing cost delta: (mortgage + property tax) vs current rent
-housing_adj_by_year = [0.0 for _ in range(years)]
-
 if (
     include_home
     and home_status == "I plan to buy"
     and mortgage_payment > 0
 ):
     total_monthly_owner_cost = mortgage_payment + est_prop_tax_monthly
-    extra_housing_monthly = total_monthly_owner_cost - current_rent  # + or -
-    for year_idx in range(years):
+    extra_housing_monthly = total_monthly_owner_cost - current_rent
+    for year_idx in range(years_full):
         if year_idx >= purchase_idx:
-            housing_adj_by_year[year_idx] = extra_housing_monthly * 12  # annual delta
+            housing_adj_by_year_full[year_idx] = extra_housing_monthly * 12
 
 # Add housing delta into annual expenses
-for y in range(years):
-    annual_expense_by_year_nominal[y] += housing_adj_by_year[y]
+for y in range(years_full):
+    annual_expense_by_year_nominal_full[y] += housing_adj_by_year_full[y]
 
 # =========================================================
-# Base scenario (nominal)
+# Base scenario (full horizon to 90, nominal)
 # =========================================================
-df = compound_schedule(
+df_full = compound_schedule(
     start_balance=start_balance_effective,
     annual_rate=annual_rate,
-    years=years,
-    monthly_contrib_by_year=monthly_contrib_by_year,
-    annual_expense_by_year=annual_expense_by_year_nominal,
+    years=years_full,
+    monthly_contrib_by_year=monthly_contrib_by_year_full,
+    annual_expense_by_year=annual_expense_by_year_nominal_full,
 )
 
-df["Age"] = current_age + df["Year"]
-df["HomePrice"] = home_price_by_year
-df["HomeEquity"] = home_equity_by_year
-df["NetWorth"] = df["Balance"] + df["HomeEquity"]
-df["HousingDelta"] = housing_adj_by_year
+df_full["Age"] = current_age + df_full["Year"]
+df_full["HomePrice"] = home_price_by_year_full
+df_full["HomeEquity"] = home_equity_by_year_full
+df_full["NetWorth"] = df_full["Balance"] + df_full["HomeEquity"]
+df_full["HousingDelta"] = housing_adj_by_year_full
 
 # Net contributions (nominal)
-df["NetContributions"] = df["CumContributions"] + df["ExpenseDrag"]
+df_full["NetContributions"] = df_full["CumContributions"] + df_full["ExpenseDrag"]
 
 # =========================================================
-# Real-dollar adjustment
+# Real-dollar adjustment (full horizon)
 # =========================================================
 if show_real and infl_rate > 0:
-    df["DF_end"] = (1 + infl_rate) ** df["Year"]
-    df["DF_mid"] = (1 + infl_rate) ** (df["Year"] - 1)
+    df_full["DF_end"] = (1 + infl_rate) ** df_full["Year"]
+    df_full["DF_mid"] = (1 + infl_rate) ** (df_full["Year"] - 1)
 
     for col in [
         "Balance",
@@ -645,39 +659,41 @@ if show_real and infl_rate > 0:
         "HomeEquity",
         "NetWorth",
     ]:
-        df[col] = df[col] / df["DF_end"]
+        df_full[col] = df_full[col] / df_full["DF_end"]
 
-    df["ContribYear"] = df["ContribYear"] / df["DF_mid"]
-    df["AnnualExpense"] = df["AnnualExpense"] / df["DF_end"]
-    df["HousingDelta"] = df["HousingDelta"] / df["DF_end"]
+    df_full["ContribYear"] = df_full["ContribYear"] / df_full["DF_mid"]
+    df_full["AnnualExpense"] = df_full["AnnualExpense"] / df_full["DF_end"]
+    df_full["HousingDelta"] = df_full["HousingDelta"] / df_full["DF_end"]
 
     cum_contrib_real = 0.0
     cum_expense_drag_real = 0.0
     cum_expense_abs_real = 0.0
     net_contrib_cum_real = 0.0
 
-    for idx in range(len(df)):
-        c = df.loc[idx, "ContribYear"]
-        e = df.loc[idx, "AnnualExpense"]
+    for idx in range(len(df_full)):
+        c = df_full.loc[idx, "ContribYear"]
+        e = df_full.loc[idx, "AnnualExpense"]
 
         cum_contrib_real += c
         cum_expense_drag_real += -e
         cum_expense_abs_real += e
         net_contrib_cum_real = cum_contrib_real + cum_expense_drag_real
 
-        df.loc[idx, "CumContributions"] = cum_contrib_real
-        df.loc[idx, "ExpenseDrag"] = cum_expense_drag_real
-        df.loc[idx, "CumulativeExpense"] = cum_expense_abs_real
-        df.loc[idx, "NetContributions"] = net_contrib_cum_real
-
+        df_full.loc[idx, "CumContributions"] = cum_contrib_real
+        df_full.loc[idx, "ExpenseDrag"] = cum_expense_drag_real
+        df_full.loc[idx, "CumulativeExpense"] = cum_expense_abs_real
+        df_full.loc[idx, "NetContributions"] = net_contrib_cum_real
 else:
-    df["DF_end"] = 1.0
-    df["DF_mid"] = 1.0
-
-ending_net_worth = df["NetWorth"].iloc[-1]
-ending_invest_balance = df["Balance"].iloc[-1]
+    df_full["DF_end"] = 1.0
+    df_full["DF_mid"] = 1.0
 
 label_suffix = " (today's dollars)" if show_real and infl_rate > 0 else " (nominal)"
+
+# Slice for visuals: only up to chosen retirement age
+df_plot = df_full[df_full["Age"] <= retirement_age].reset_index(drop=True)
+
+ending_net_worth = df_plot["NetWorth"].iloc[-1]
+ending_invest_balance = df_plot["Balance"].iloc[-1]
 
 # =========================================================
 # MAIN LAYOUT: left = chart etc., right = FI KPI card
@@ -708,8 +724,9 @@ with fi_col:
     ) / 100.0
 
     st.caption(
-        "This is the '4% rule' style input. The planner auto-adjusts the actual "
-        "withdrawal rate based on how many years remain until age 90."
+        "FI age is computed using your portfolio path from now to age 90. "
+        "The retirement-age slider only controls when contributions stop "
+        "and how far the chart extends."
     )
 
     # Barista FIRE controls
@@ -735,7 +752,7 @@ with fi_col:
             "End age for part-time work",
             value=65,
             min_value=current_age + 1,
-            max_value=90,
+            max_value=max_sim_age,
             step=1,
             key="barista_end_age",
         )
@@ -748,103 +765,115 @@ with fi_col:
             key="barista_start_age",
         )
 
+    # ---------------- FI age (base + horizon-aware SWR, but fixed age) -------------
     fi_age = None
     fi_portfolio = None
     fi_required = None
     effective_swr = None
     horizon_years = None
 
+    if fi_annual_spend_today > 0 and base_swr_30yr > 0:
+        # first, earliest FI age with base 30-yr SWR, using full horizon df
+        fi_age0, _, _ = compute_fi_age(
+            df_full, fi_annual_spend_today, infl_rate, show_real, base_swr_30yr
+        )
+
+        if fi_age0 is not None:
+            row0 = df_full.loc[df_full["Age"] == fi_age0]
+            if not row0.empty:
+                row0 = row0.iloc[0]
+                year0 = row0["Year"]
+                balance0 = row0["Balance"]
+
+                horizon_years = max(max_sim_age - fi_age0, 1)
+                effective_swr = adjusted_swr_for_horizon(
+                    horizon_years, base_30yr_swr=base_swr_30yr
+                )
+                multiple_eff = 1.0 / effective_swr
+
+                if show_real and infl_rate > 0:
+                    fi_required = fi_annual_spend_today * multiple_eff
+                else:
+                    fi_required = (
+                        fi_annual_spend_today * ((1 + infl_rate) ** year0) * multiple_eff
+                    )
+
+                if balance0 >= fi_required:
+                    fi_age = fi_age0
+                    fi_portfolio = balance0
+                else:
+                    fi_age = None
+                    fi_portfolio = None
+
+    # ---------------- Barista FI (horizon-aware, using full df) --------------------
     barista_age = None
     barista_portfolio = None
     barista_required = None
     barista_effective_swr = None
     barista_horizon_years = None
 
-    if fi_annual_spend_today > 0 and base_swr_30yr > 0:
-        # ---- Full FI (no earned income) ----
-        swr0 = base_swr_30yr
+    if (
+        use_barista
+        and barista_income_today > 0
+        and barista_start_age is not None
+        and fi_annual_spend_today > 0
+        and base_swr_30yr > 0
+    ):
+        S = fi_annual_spend_today
+        B = barista_income_today
 
-        fi_age0, fi_pv0, fi_req0 = compute_fi_age(
-            df, fi_annual_spend_today, infl_rate, show_real, swr0
-        )
+        for row in df_full.itertuples():
+            age = row.Age
+            year = row.Year
+            balance = row.Balance
 
-        if fi_age0 is not None:
-            horizon0 = max(90 - fi_age0, 1)
-            swr1 = adjusted_swr_for_horizon(horizon0, base_30yr_swr=base_swr_30yr)
+            if age >= max_sim_age:
+                continue
+            if age < barista_start_age:
+                continue
 
-            if abs(swr1 - swr0) > 1e-4:
-                fi_age1, fi_pv1, fi_req1 = compute_fi_age(
-                    df, fi_annual_spend_today, infl_rate, show_real, swr1
-                )
-                if fi_age1 is not None:
-                    fi_age, fi_portfolio, fi_required = fi_age1, fi_pv1, fi_req1
-                    horizon_years = max(90 - fi_age1, 1)
-                    effective_swr = swr1
-                else:
-                    fi_age, fi_portfolio, fi_required = fi_age0, fi_pv0, fi_req0
-                    horizon_years = horizon0
-                    effective_swr = swr0
+            T = max(max_sim_age - age, 1)
+
+            years_barista = max(0, min(barista_end_age - age, T))
+            years_post_barista = T - years_barista
+
+            S_bar_today = max(S - B, 0.0)
+
+            S_eff_today = (
+                S_bar_today * years_barista + S * years_post_barista
+            ) / T
+
+            if S_eff_today <= 0:
+                required_portfolio_i = 0.0
             else:
-                fi_age, fi_portfolio, fi_required = fi_age0, fi_pv0, fi_req0
-                horizon_years = horizon0
-                effective_swr = swr0
+                swr_i = adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
+                multiple_i = 1.0 / swr_i
 
-        # ---- Barista FI (choose when you can start part-time and still reach FI) ----
-        if use_barista and barista_income_today > 0 and barista_start_age is not None:
-            S = fi_annual_spend_today
-            B = barista_income_today
-
-            for row in df.itertuples():
-                age = row.Age
-                year = row.Year
-                balance = row.Balance
-
-                if age >= 90:
-                    continue
-                if age < barista_start_age:
-                    continue
-
-                T = max(90 - age, 1)
-
-                # Years with barista income between this age and barista_end_age
-                years_barista = max(0, min(barista_end_age - age, T))
-                years_post_barista = T - years_barista
-
-                # Spending that must come from portfolio in barista years (today's $)
-                S_bar_today = max(S - B, 0.0)
-
-                # Average effective portfolio-funded spending over full horizon
-                S_eff_today = (
-                    S_bar_today * years_barista + S * years_post_barista
-                ) / T
-
-                if S_eff_today <= 0:
-                    required_portfolio_i = 0.0
+                if show_real and infl_rate > 0:
+                    required_portfolio_i = S_eff_today * multiple_i
                 else:
-                    swr_i = adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
-                    multiple_i = 1.0 / swr_i
-
-                    if show_real and infl_rate > 0:
-                        required_portfolio_i = S_eff_today * multiple_i
-                    else:
-                        required_portfolio_i = (
-                            S_eff_today * ((1 + infl_rate) ** year) * multiple_i
-                        )
-
-                if balance >= required_portfolio_i:
-                    barista_age = int(age)
-                    barista_portfolio = balance
-                    barista_required = required_portfolio_i
-                    barista_horizon_years = T
-                    barista_effective_swr = (
-                        adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
-                        if S_eff_today > 0
-                        else base_swr_30yr
+                    required_portfolio_i = (
+                        S_eff_today * ((1 + infl_rate) ** year) * multiple_i
                     )
-                    break
 
+            if balance >= required_portfolio_i:
+                barista_age = int(age)
+                barista_portfolio = balance
+                barista_required = required_portfolio_i
+                barista_horizon_years = T
+                barista_effective_swr = (
+                    adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
+                    if S_eff_today > 0
+                    else base_swr_30yr
+                )
+                break
+
+    # ---------------- Render FI card -------------------
     if fi_age is not None:
-        # Optional Barista line
+        if effective_swr is None:
+            effective_swr = base_swr_30yr
+            horizon_years = max(max_sim_age - fi_age, 1) if horizon_years is None else horizon_years
+
         if use_barista and barista_age is not None:
             barista_line = (
                 f"Barista FI: you can switch to part-time as early as age {barista_age} "
@@ -852,8 +881,8 @@ with fi_col:
             )
         elif use_barista:
             barista_line = (
-                f"Barista FI with ${barista_income_today:,.0f}/yr until age {barista_end_age}: not reached "
-                f"given this barista start age setting."
+                f"Barista FI with ${barista_income_today:,.0f}/yr until age {barista_end_age}: "
+                "not reached under these assumptions."
             )
         else:
             barista_line = ""
@@ -874,7 +903,7 @@ with fi_col:
               </div>
               <div style="font-size:14px; color:#555555; margin-top:6px;">
                 Effective SWR: {effective_swr*100:.2f}% &bull;
-                Horizon: ~{horizon_years:.0f} years (to age 90)<br>
+                Horizon: ~{horizon_years:.0f} years (to age {max_sim_age})<br>
                 Base 30-year SWR input: {base_swr_30yr*100:.2f}%
               </div>
               {f'<div style="font-size:14px; color:#666666; margin-top:10px;">{barista_line}</div>' if barista_line else ''}
@@ -898,15 +927,15 @@ with fi_col:
         )
         st.markdown(fi_card_html, unsafe_allow_html=True)
         st.caption(
-            "With the current assumptions and horizon-aware withdrawal rate, "
-            "FI is not reached before your retirement age."
+            "Under the horizon-aware withdrawal rate, FI is not reached by age 90 "
+            "with the current assumptions."
         )
 
 # -----------------------------
-# LEFT COLUMN: main content
+# LEFT COLUMN: main content (uses df_plot up to retirement age)
 # -----------------------------
 with main_left:
-    st.subheader(f"Ending net worth: ${ending_net_worth:,.0f}{label_suffix}")
+    st.subheader(f"Net worth at retirement age: ${ending_net_worth:,.0f}{label_suffix}")
     st.caption(
         f"(Investments: ${ending_invest_balance:,.0f}; home equity included in net worth.)"
     )
@@ -961,8 +990,8 @@ with main_left:
         )
 
     assumptions.append(
-        "- Financial independence age is calculated using your investment portfolio only "
-        "(home equity is excluded from FI calculations)."
+        "- Financial independence age is calculated from the full path to age 90; "
+        "home equity is excluded from FI calculations."
     )
 
     if use_barista:
@@ -976,25 +1005,23 @@ with main_left:
         st.markdown("**Key assumptions & notes**")
         st.markdown("\n".join(assumptions))
 
-    # Chart: Net contributions + investment growth + home equity
+    # Chart: Net contributions + investment growth + home equity (up to retirement age)
     color_net_contrib = "#C8A77A"
     color_invest_growth = "#3A6EA5"
     color_home = "#A7ADB2"
 
-    # ----- Highlight first year where NetWorth >= 1M by recoloring that bar -----
     highlight_color = "#CCAA00"  # gold
 
-    highlight_mask = df["NetWorth"] >= 1_000_000
+    highlight_mask = df_plot["NetWorth"] >= 1_000_000
     if highlight_mask.any():
         first_million_index = highlight_mask.idxmax()
     else:
         first_million_index = None
 
-    # Build per-row marker colors
     net_colors = []
     growth_colors = []
     home_colors = []
-    for idx in df.index:
+    for idx in df_plot.index:
         if first_million_index is not None and idx == first_million_index:
             net_colors.append(highlight_color)
             growth_colors.append(highlight_color)
@@ -1007,8 +1034,8 @@ with main_left:
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
-            x=df["Age"],
-            y=df["NetContributions"],
+            x=df_plot["Age"],
+            y=df_plot["NetContributions"],
             name="Net contributions (after expenses)",
             marker_color=net_colors,
             hovertemplate="Age %{x}<br>Net contributions: $%{y:,.0f}<extra></extra>",
@@ -1016,8 +1043,8 @@ with main_left:
     )
     fig.add_trace(
         go.Bar(
-            x=df["Age"],
-            y=df["InvestGrowth"],
+            x=df_plot["Age"],
+            y=df_plot["InvestGrowth"],
             name="Investment growth (cumulative)",
             marker_color=growth_colors,
             hovertemplate="Age %{x}<br>Investment growth: $%{y:,.0f}<extra></extra>",
@@ -1025,15 +1052,15 @@ with main_left:
     )
     fig.add_trace(
         go.Bar(
-            x=df["Age"],
-            y=df["HomeEquity"],
+            x=df_plot["Age"],
+            y=df_plot["HomeEquity"],
             name="Home equity",
             marker_color=home_colors,
             hovertemplate="Age %{x}<br>Home equity: $%{y:,.0f}<extra></extra>",
         )
     )
 
-    ages = df["Age"].tolist()
+    ages = df_plot["Age"].tolist()
     tickvals = []
     for i, age in enumerate(ages):
         if i == 0 or i == len(ages) - 1 or age % 5 == 0:
@@ -1086,14 +1113,13 @@ with main_left:
         ),
     )
 
-    # minimal annotation on last bar, slightly above the stack
     stacked_heights = (
-        df["NetContributions"] + df["InvestGrowth"] + df["HomeEquity"]
+        df_plot["NetContributions"] + df_plot["InvestGrowth"] + df_plot["HomeEquity"]
     )
-    last_age = df["Age"].iloc[-1]
+    last_age = df_plot["Age"].iloc[-1]
     last_bar_height = stacked_heights.iloc[-1]
     max_bar_height = stacked_heights.max()
-    label_y = last_bar_height + max_bar_height * 0.03  # 3% above bar
+    label_y = last_bar_height + max_bar_height * 0.03
 
     fig.add_annotation(
         x=last_age,
@@ -1118,19 +1144,28 @@ with main_left:
     )
 
     if extra_per_month != 0:
-        monthly_contrib_by_year_more = [
-            c + extra_per_month * (1 + infl_rate) ** y
-            for y, c in enumerate(monthly_contrib_by_year)
-        ]
+        # only need to simulate to retirement age for this comparison
+        years_extra = years_plot
+        monthly_contrib_by_year_extra = []
+        for y in range(years_extra):
+            age = current_age + y
+            base_c = monthly_contrib_base_today * (1 + contrib_growth_rate) ** y * (1 + infl_rate) ** y
+            if age < retirement_age:
+                c = base_c + extra_per_month * (1 + infl_rate) ** y
+            else:
+                c = 0.0
+            monthly_contrib_by_year_extra.append(c)
+
+        annual_expenses_extra = annual_expense_by_year_nominal_full[:years_extra]
 
         df_more = compound_schedule(
             start_balance=start_balance_effective,
             annual_rate=annual_rate,
-            years=years,
-            monthly_contrib_by_year=monthly_contrib_by_year_more,
-            annual_expense_by_year=annual_expense_by_year_nominal,
+            years=years_extra,
+            monthly_contrib_by_year=monthly_contrib_by_year_extra,
+            annual_expense_by_year=annual_expenses_extra,
         )
-        df_more["HomeEquity"] = home_equity_by_year
+        df_more["HomeEquity"] = home_equity_by_year_full[:years_extra]
         df_more["NetWorth"] = df_more["Balance"] + df_more["HomeEquity"]
 
         if show_real and infl_rate > 0:
@@ -1150,10 +1185,10 @@ with main_left:
     else:
         st.caption("Set a non-zero amount to see the impact on ending net worth.")
 
-    # Age-by-age table
+    # Age-by-age table (up to retirement age)
     st.markdown("### Age-by-age breakdown")
 
-    display_df = df.copy()
+    display_df = df_plot.copy()
     display_df["InvestmentValue"] = display_df["Balance"]
     display_df["Home Value"] = display_df["HomePrice"]
     display_df["Home Equity"] = display_df["HomeEquity"]
