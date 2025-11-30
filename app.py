@@ -1024,7 +1024,7 @@ with main_left:
             title=dict(text="Amount ($)", font=dict(size=14)),
             tickfont=dict(size=12),
             showgrid=True,
-            gridcolor="#777777",
+            gridcolor="#E0E0E0",
             tickprefix="$",
             tickformat=",.0f",
             separatethousands=True,
@@ -1148,4 +1148,5 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
+
 
