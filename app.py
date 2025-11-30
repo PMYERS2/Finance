@@ -940,19 +940,20 @@ with fi_col:
 
         if use_barista and barista_age is not None:
             barista_line = (
-                f"Barista FI (bridge model): you can switch to part-time as early as age {barista_age} "
-                f"with ${barista_income_today:,.0f}/yr until age {barista_end_age}, "
+                "Barista FI (bridge model): you can switch to part-time as early as "
+                f"age {barista_age} with ${barista_income_today:,.0f}/yr until age {barista_end_age}, "
                 f"and still reach a {base_swr_30yr*100:.1f}% FI target of "
-                f\"${barista_fi_target_real:,.0f} by age {retirement_age} "
+                f"${barista_fi_target_real:,.0f} by age {retirement_age} "
                 f"(projected portfolio at that age: ${barista_fi_balance_real:,.0f})."
             )
-        elif use_barista:
-            barista_line = (
-                f"Barista FI bridge model with ${barista_income_today:,.0f}/yr until age {barista_end_age}: "
-                "not reached under these assumptions (cannot bridge to the FI target by retirement age)."
-            )
-        else:
-            barista_line = ""
+    elif use_barista:
+        barista_line = (
+            f"Barista FI bridge model with ${barista_income_today:,.0f}/yr until age {barista_end_age}: "
+            "not reached under these assumptions (cannot bridge to the FI target by retirement age)."
+    )
+    else:
+        barista_line = ""
+
 
         fi_card_html = textwrap.dedent(
             f"""
@@ -1328,3 +1329,4 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
+
