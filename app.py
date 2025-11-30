@@ -683,7 +683,7 @@ label_suffix = " (today's dollars)" if show_real and infl_rate > 0 else " (nomin
 main_left, fi_col = st.columns([4, 2])
 
 # -----------------------------
-# RIGHT COLUMN: Financial independence age (portfolio only)
+# RIGHT COLUMN: Financial independence age (+ Barista FIRE)
 # -----------------------------
 with fi_col:
     st.markdown("### Financial independence age")
@@ -710,13 +710,37 @@ with fi_col:
         "withdrawal rate based on how many years remain until age 90."
     )
 
+    # Barista FIRE controls
+    use_barista = st.checkbox(
+        "Show Barista FIRE scenario (part-time income in FI)",
+        value=False,
+        key="barista_toggle",
+    )
+
+    barista_income_today = 0.0
+    if use_barista:
+        barista_income_today = st.number_input(
+            "Expected part-time income in FI ($/yr, today's)",
+            value=20000,
+            step=5000,
+            min_value=0,
+            key="barista_income",
+        )
+
     fi_age = None
     fi_portfolio = None
     fi_required = None
     effective_swr = None
     horizon_years = None
 
+    barista_age = None
+    barista_portfolio = None
+    barista_required = None
+    barista_effective_swr = None
+    barista_horizon_years = None
+
     if fi_annual_spend_today > 0 and base_swr_30yr > 0:
+        # ---- Full FI (no earned income) ----
         initial_horizon = max(90 - retirement_age, 1)
         swr0 = adjusted_swr_for_horizon(initial_horizon, base_30yr_swr=base_swr_30yr)
 
@@ -745,26 +769,82 @@ with fi_col:
                 horizon_years = horizon0
                 effective_swr = swr0
 
+        # ---- Barista FI (part-time income reduces required withdrawal) ----
+        if use_barista:
+            required_from_portfolio_today = max(
+                0.0, fi_annual_spend_today - barista_income_today
+            )
+            if required_from_portfolio_today > 0:
+                barista_age0, barista_pv0, barista_req0 = compute_fi_age(
+                    df, required_from_portfolio_today, infl_rate, show_real, swr0
+                )
+                if barista_age0 is not None:
+                    barista_h0 = max(90 - barista_age0, 1)
+                    barista_swr1 = adjusted_swr_for_horizon(
+                        barista_h0, base_30yr_swr=base_swr_30yr
+                    )
+                    if abs(barista_swr1 - swr0) > 1e-4:
+                        barista_age1, barista_pv1, barista_req1 = compute_fi_age(
+                            df,
+                            required_from_portfolio_today,
+                            infl_rate,
+                            show_real,
+                            barista_swr1,
+                        )
+                        if barista_age1 is not None:
+                            barista_age = barista_age1
+                            barista_portfolio = barista_pv1
+                            barista_required = barista_req1
+                            barista_horizon_years = barista_h0
+                            barista_effective_swr = barista_swr1
+                        else:
+                            barista_age = barista_age0
+                            barista_portfolio = barista_pv0
+                            barista_required = barista_req0
+                            barista_horizon_years = barista_h0
+                            barista_effective_swr = swr0
+                    else:
+                        barista_age = barista_age0
+                        barista_portfolio = barista_pv0
+                        barista_required = barista_req0
+                        barista_horizon_years = barista_h0
+                        barista_effective_swr = swr0
+
     if fi_age is not None:
+        # Optional Barista line
+        if use_barista and barista_age is not None:
+            barista_line = (
+                f"Barista FI age with ${barista_income_today:,.0f}/yr earned: "
+                f"{barista_age} "
+                f"(needs ≈ ${barista_required:,.0f}/yr from portfolio)"
+            )
+        elif use_barista:
+            barista_line = (
+                f"Barista FI age with ${barista_income_today:,.0f}/yr earned: not reached"
+            )
+        else:
+            barista_line = ""
+
         fi_card_html = textwrap.dedent(
             f"""
             <div style="background-color:#E5E5E5; padding:30px 20px; border-radius:12px;
-                        text-align:center; margin-bottom:20px; border:1px solid #333;">
-              <div style="font-size:20px; color:#2F2F2F; margin-bottom:4px;">
+                        text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
+              <div style="font-size:20px; color:#333333; margin-bottom:4px;">
                 Financial independence age
               </div>
-              <div style="font-size:72px; font-weight:700; color:#2F2F2F; line-height:1.05;">
+              <div style="font-size:72px; font-weight:700; color:#000000; line-height:1.05;">
                 {fi_age}
               </div>
-              <div style="font-size:16px; color:#2F2F2F; margin-top:14px;">
+              <div style="font-size:16px; color:#444444; margin-top:14px;">
                 FI target: ${fi_required:,.0f} &bull;
                 Portfolio at FI: ${fi_portfolio:,.0f}
               </div>
-              <div style="font-size:14px; color:#2F2F2F; margin-top:6px;">
+              <div style="font-size:14px; color:#555555; margin-top:6px;">
                 Effective SWR: {effective_swr*100:.2f}% &bull;
                 Horizon: ~{horizon_years:.0f} years (to age 90)<br>
                 Base 30-year SWR input: {base_swr_30yr*100:.2f}%
               </div>
+              {f'<div style="font-size:14px; color:#666666; margin-top:10px;">{barista_line}</div>' if barista_line else ''}
             </div>
             """
         )
@@ -772,12 +852,12 @@ with fi_col:
     else:
         fi_card_html = textwrap.dedent(
             """
-            <div style="background-color:#111; padding:24px 20px; border-radius:12px;
-                        text-align:center; margin-bottom:16px; border:1px solid #333;">
-              <div style="font-size:18px; color:#bbbbbb; margin-bottom:6px;">
+            <div style="background-color:#E5E5E5; padding:24px 20px; border-radius:12px;
+                        text-align:center; margin-bottom:16px; border:1px solid #CFCFCF;">
+              <div style="font-size:18px; color:#333333; margin-bottom:6px;">
                 Financial independence age
               </div>
-              <div style="font-size:32px; font-weight:600; color:#ff6b6b;">
+              <div style="font-size:32px; font-weight:600; color:#CC0000;">
                 Not reached
               </div>
             </div>
@@ -852,15 +932,20 @@ with main_left:
         "(home equity is excluded from FI calculations)."
     )
 
+    if use_barista:
+        assumptions.append(
+            f"- Barista FIRE scenario optionally reduces required withdrawals by "
+            f"`${barista_income_today:,.0f}`/year of part-time income."
+        )
+
     if assumptions:
         st.markdown("**Key assumptions & notes**")
         st.markdown("\n".join(assumptions))
 
     # Chart: Net contributions + investment growth + home equity
-    color_net_contrib = "#C8A77A"
-    color_invest_growth = "#3A6EA5"
-    color_home = "#A7ADB2"
-
+    color_net_contrib = "#5BA68E"
+    color_invest_growth = "#D9A441"
+    color_home = "#4C6E91"
 
     fig = go.Figure()
     fig.add_trace(
@@ -906,6 +991,7 @@ with main_left:
             x=0.5,
             xanchor="center",
             font=dict(size=18),
+            pad=dict(b=10),  # padding below title
         ),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
@@ -932,30 +1018,32 @@ with main_left:
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1,
+            y=0.96,  # move legend slightly down from title
             xanchor="center",
             x=0.5,
             font=dict(size=12),
         ),
     )
 
-    # minimal annotation on last bar
+    # minimal annotation on last bar, slightly above the stack
     last_age = df["Age"].iloc[-1]
-    last_bar_height = (
-        df["NetContributions"].iloc[-1]
-        + df["InvestGrowth"].iloc[-1]
-        + df["HomeEquity"].iloc[-1]
+    stacked_heights = (
+        df["NetContributions"] + df["InvestGrowth"] + df["HomeEquity"]
     )
-    max_bar_height = (
-    df["NetContributions"] + df["InvestGrowth"] + df["HomeEquity"]).max()
+    last_bar_height = stacked_heights.iloc[-1]
+    max_bar_height = stacked_heights.max()
     label_y = last_bar_height + max_bar_height * 0.03  # 3% above bar
+
     fig.add_annotation(
         x=last_age,
         y=label_y,
         text=f"${ending_net_worth:,.0f}",
         showarrow=False,
-        font=dict(size=13, color="black"),
-        bgcolor="rgba(0,0,0,0)",
+        font=dict(size=12, color="black", family="Arial"),
+        bgcolor="rgba(255,255,255,0.65)",
+        bordercolor="black",
+        borderwidth=0.5,
+        borderpad=3,
     )
 
     st.plotly_chart(fig, use_container_width=True)
