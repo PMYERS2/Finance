@@ -1051,16 +1051,12 @@ with main_left:
     label_y = last_bar_height + max_bar_height * 0.03  # 3% above bar
 
     fig.add_annotation(
-        x=last_age,
-        y=label_y,
-        text=f"${ending_net_worth:,.0f}",
-        showarrow=False,
-        font=dict(size=12, color="black", family="Arial"),
-        bgcolor="rgba(255,255,255,0.65)",
-        bordercolor="black",
-        borderwidth=0.5,
-        borderpad=3,
-    )
+    x=last_age,
+    y=label_y,
+    text=f"${ending_net_worth:,.0f}",
+    showarrow=False,
+    font=dict(size=14, color="black", family="Arial"),
+)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -1148,5 +1144,6 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
+
 
 
