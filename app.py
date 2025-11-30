@@ -932,7 +932,7 @@ with main_left:
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=.98,
+            y=1,
             xanchor="center",
             x=0.5,
             font=dict(size=12),
@@ -954,8 +954,8 @@ with main_left:
         y=label_y,
         text=f"${ending_net_worth:,.0f}",
         showarrow=False,
-        font=dict(size=11, color="white"),
-        bgcolor="rgba(0,0,0,0.35)",
+        font=dict(size=13, color="black"),
+        bgcolor="rgba(0,0,0,0)",
     )
 
     st.plotly_chart(fig, use_container_width=True)
