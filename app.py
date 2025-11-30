@@ -1080,6 +1080,7 @@ def main():
                 key="barista_end_age",
             )
 
+        # --- Compute FI and Barista FI metrics ---
         fi_age, fi_portfolio, fi_required, effective_swr, horizon_years = (
             compute_fi_age_horizon(
                 df_full,
@@ -1099,6 +1100,7 @@ def main():
             barista_bridge_years,
             barista_pv_bridge_need_real,
         ) = (None, None, None, None, None, None)
+        taxable_ratio_rec = None
 
         if (
             use_barista
@@ -1128,51 +1130,25 @@ def main():
                 extra_health_today=extra_health_today,
             )
 
+            if (
+                barista_age is not None
+                and barista_start_balance_real is not None
+                and barista_start_balance_real > 0
+                and barista_pv_bridge_need_real is not None
+            ):
+                taxable_ratio_rec = min(
+                    1.0, barista_pv_bridge_need_real / barista_start_balance_real
+                )
+
+        # --- FI KPI card ---
         if fi_age is not None:
             if effective_swr is None:
                 effective_swr = base_swr_30yr
                 horizon_years = (
-                    max(max_sim_age - fi_age, 1) if horizon_years is None else horizon_years
+                    max(max_sim_age - fi_age, 1)
+                    if horizon_years is None
+                    else horizon_years
                 )
-
-            if use_barista and barista_age is not None:
-                if barista_start_balance_real and barista_start_balance_real > 0:
-                    taxable_ratio_rec = min(
-                        1.0, barista_pv_bridge_need_real / barista_start_balance_real
-                    )
-                else:
-                    taxable_ratio_rec = None
-
-                bridge_text_lines = [
-                    f"Barista bridge: earliest feasible part-time age is {barista_age}, "
-                    f"with ${barista_income_today:,.0f}/yr part-time income until up to age {barista_end_age}.",
-                    f"The model bridges ~{barista_bridge_years} years to a {base_swr_30yr*100:.1f}% FI target "
-                    f"of ${barista_fi_target_real:,.0f} at age {retirement_age} "
-                    f"(projected portfolio then: ${barista_fi_balance_real:,.0f}).",
-                    f"Bridge includes +${extra_health_today:,.0f}/yr health costs "
-                    f"and {barista_tax_rate_bridge*100:.0f}% tax on portfolio withdrawals.",
-                ]
-
-                if taxable_ratio_rec is not None:
-                    bridge_text_lines.append(
-                        f"Approximate taxable need for the bridge (PV of withdrawals) is "
-                        f"${barista_pv_bridge_need_real:,.0f}, which is about "
-                        f"{taxable_ratio_rec*100:.0f}% of your projected portfolio at Barista age. "
-                        f"Aim to have at least this share of your portfolio in taxable accounts "
-                        f"for this Barista plan to be flexible."
-                    )
-
-                bridge_text = " ".join(bridge_text_lines)
-
-            elif use_barista:
-                bridge_text = (
-                    f"Barista bridge with ${barista_income_today:,.0f}/yr part-time income, "
-                    f"+${extra_health_today:,.0f}/yr health, and "
-                    f"{barista_tax_rate_bridge*100:.0f}% withdrawal tax is not feasible to "
-                    f"reach the FI target by age {retirement_age} under these assumptions."
-                )
-            else:
-                bridge_text = ""
 
             fi_card_html = textwrap.dedent(
                 f"""
@@ -1193,7 +1169,6 @@ def main():
                     Horizon: ~{horizon_years:.0f} years (to age {max_sim_age})<br>
                     Base 30-year SWR input: {base_swr_30yr*100:.2f}%
                   </div>
-                  {f'<div style="font-size:14px; color:#666666; margin-top:10px;">{bridge_text}</div>' if bridge_text else ''}
                 </div>
                 """
             )
@@ -1217,6 +1192,73 @@ def main():
                 "Under the horizon-aware withdrawal rate, FI is not reached by age 90 "
                 "with the current assumptions."
             )
+
+        # --- Separate Barista FIRE KPI card ---
+        if use_barista:
+            if barista_age is not None:
+                summary_line = (
+                    f"Part-time from age {barista_age} to {barista_end_age} "
+                    f"(~{barista_bridge_years:.0f} years) before full FI at age {retirement_age}."
+                )
+
+                target_line = (
+                    f"FI target: ${barista_fi_target_real:,.0f} &bull; "
+                    f"Projected portfolio at FI: ${barista_fi_balance_real:,.0f}"
+                )
+
+                taxable_line = ""
+                if taxable_ratio_rec is not None and barista_pv_bridge_need_real is not None:
+                    taxable_line = (
+                        f"Bridge withdrawals present value: ${barista_pv_bridge_need_real:,.0f} "
+                        f"(~{taxable_ratio_rec*100:.0f}% of portfolio at Barista age)."
+                    )
+
+                barista_card_html = textwrap.dedent(
+                    f"""
+                    <div style="background-color:#F0EFEF; padding:26px 20px; border-radius:12px;
+                                text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
+                      <div style="font-size:20px; color:#333333; margin-bottom:4px;">
+                        Barista FIRE age
+                      </div>
+                      <div style="font-size:64px; font-weight:700; color:#000000; line-height:1.05;">
+                        {barista_age}
+                      </div>
+                      <div style="font-size:15px; color:#444444; margin-top:12px;">
+                        {summary_line}
+                      </div>
+                      <div style="font-size:14px; color:#555555; margin-top:6px;">
+                        Part-time income: ${barista_income_today:,.0f}/yr &bull;
+                        Extra health costs: ${extra_health_today:,.0f}/yr &bull;
+                        Withdrawal tax: {barista_tax_rate_bridge*100:.0f}%
+                      </div>
+                      <div style="font-size:14px; color:#555555; margin-top:6px;">
+                        {target_line}
+                      </div>
+                      {f'<div style="font-size:13px; color:#666666; margin-top:6px;">{taxable_line}</div>' if taxable_line else ''}
+                    </div>
+                    """
+                )
+                st.markdown(barista_card_html, unsafe_allow_html=True)
+            else:
+                barista_card_html = textwrap.dedent(
+                    f"""
+                    <div style="background-color:#F0EFEF; padding:24px 20px; border-radius:12px;
+                                text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
+                      <div style="font-size:20px; color:#333333; margin-bottom:6px;">
+                        Barista FIRE age
+                      </div>
+                      <div style="font-size:28px; font-weight:600; color:#CC0000;">
+                        Not feasible
+                      </div>
+                      <div style="font-size:13px; color:#555555; margin-top:8px;">
+                        With ${barista_income_today:,.0f}/yr part-time income, extra health costs of
+                        ${extra_health_today:,.0f}/yr, and a {barista_tax_rate_bridge*100:.0f}% tax
+                        rate on withdrawals, the model cannot reach the FI target by age {retirement_age}.
+                      </div>
+                    </div>
+                    """
+                )
+                st.markdown(barista_card_html, unsafe_allow_html=True)
 
     # Barista income series (not shown in table)
     barista_income_series = []
