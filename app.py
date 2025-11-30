@@ -267,14 +267,11 @@ def compute_barista_fi_age_bridge(
 # Tax model (federal + FICA + optional state)
 # =========================================================
 def federal_tax_single_approx(income):
-    """
-    Approximate US federal income tax for a single filer, no deductions.
-    Applied directly to real income.
-    """
+    """Approximate US federal income tax for a single filer, no deductions."""
     if income <= 0:
         return 0.0
 
-    # 2024-ish brackets (rounded)
+    # Rough 2024-ish brackets
     brackets = [
         (0.0, 11600.0, 0.10),
         (11600.0, 47150.0, 0.12),
@@ -309,7 +306,6 @@ def total_tax_on_earned(income, state_tax_rate):
       - Social Security (6.2% up to wage base)
       - Medicare (1.45% on all wages)
       - Flat state income tax (user input)
-    All in real dollars if income is real.
     """
     if income <= 0:
         return 0.0
@@ -344,12 +340,7 @@ def build_income_schedule(
 ):
     """
     Build a per-year income / expense / investable schedule.
-    All values returned in real (today's) dollars if show_real=True.
-
-    Taxes:
-      - Treat start_income as pre-tax.
-      - Apply federal + FICA + flat state tax to income.
-      - Expenses are assumed after-tax.
+    Returns values in real (today's) dollars if show_real=True, otherwise nominal.
     """
     years = retirement_age - current_age
     rows = []
@@ -796,15 +787,18 @@ def main():
         age = current_age + y
         annual_rates_by_year_full.append(glide_path_return(age, annual_rate_base))
 
+    # ---- FIXED LOGIC: contributions always nominal in simulation ----
     monthly_contrib_by_year_full = []
     for y in range(years_full):
         age = current_age + y
         if age < retirement_age and y < len(df_income):
             contrib_month_real = df_income.loc[y, "InvestableRealMonthly"]
             if show_real and infl_rate > 0:
-                val = contrib_month_real
-            else:
+                # df_income is real → convert to nominal for simulation
                 val = contrib_month_real * ((1 + infl_rate) ** y)
+            else:
+                # df_income already nominal
+                val = contrib_month_real
         else:
             val = 0.0
         monthly_contrib_by_year_full.append(val)
@@ -976,10 +970,6 @@ def main():
             "NetWorth",
         ]:
             df_full[col] = df_full[col] / df_full["DF_end"]
-
-        df_full["ContribYear"] = df_full["ContribYear"] / df_full["DF_mid"]
-        df_full["AnnualExpense"] = df_full["AnnualExpense"] / df_full["DF_end"]
-        df_full["HousingDelta"] = df_full["HousingDelta"] / df_full["DF_end"]
 
         cum_contrib_real = 0.0
         cum_expense_drag_real = 0.0
@@ -1261,78 +1251,6 @@ def main():
             f"(Investments: ${ending_invest_balance:,.0f}; home equity included in net worth.)"
         )
 
-        assumptions = []
-
-        if len(df_income) > 0:
-            first_row = df_income.iloc[0]
-            assumptions.append(
-                f"- Current income model (after income tax + FICA + state): income ≈ "
-                f"${first_row['IncomeRealAfterTax']:,.0f}/yr, expenses ≈ "
-                f"${first_row['ExpensesReal']:,.0f}/yr, investable ≈ "
-                f"${first_row['InvestableRealAnnual']:,.0f}/yr "
-                f"({first_row['SavingsRate']*100:.1f}% savings rate on after-tax income)."
-            )
-        assumptions.append(
-            f"- Pre-tax income grows at {income_growth_rate*100:.1f}%/yr; "
-            f"expenses grow at {expense_growth_rate*100:.1f}%/yr above inflation."
-        )
-
-        if use_kid_expenses:
-            assumptions.append(
-                f"- Kid expenses: ages **{kids_start_age}–{kids_end_age}**, "
-                f"{num_kids} kid(s) at `${annual_cost_per_kid_today:,.0f}`/kid/year (today's $)."
-            )
-        if use_car_expenses:
-            assumptions.append(
-                f"- Cars: `${car_cost_today:,.0f}` (today's $) starting at age **{first_car_age}** "
-                f"every **{car_interval_years}** years."
-            )
-
-        if include_home:
-            if home_status == "I already own a home":
-                assumptions.append(
-                    f"- Home: currently worth `${current_home_value_today:,.0f}`, "
-                    f"current equity `${equity_amount_now:,.0f}`, "
-                    f"{years_remaining_loan} years remaining at **{mortgage_rate*100:.2f}%**."
-                )
-            else:
-                assumptions.append(
-                    f"- Home: purchase at age **{planned_purchase_age}**, today's price `${home_price_today:,.0f}`, "
-                    f"down `{down_payment_pct*100:.1f}%`, {mortgage_rate*100:.2f}% mortgage over {mortgage_term_years} years, "
-                    f"{home_app_rate*100:.1f}%/yr appreciation, {maintenance_pct*100:.1f}% maintenance."
-                )
-                assumptions.append(
-                    f"- After purchase: housing cost uses mortgage payment + estimated property tax/insurance "
-                    f"of `${est_prop_tax_monthly*12:,.0f}`/yr compared with current rent `${current_rent:,.0f}`/month. "
-                    "The difference is modeled as additional annual housing expense."
-                )
-
-        if show_real and infl_rate > 0:
-            assumptions.append(
-                f"- All values shown in today's dollars using **{infl_rate*100:.1f}%** inflation."
-            )
-
-        assumptions.append(
-            "- Age-based glide path for returns: higher expected nominal returns early in your career, "
-            "gradually de-risking as you approach and pass traditional FI age."
-        )
-        assumptions.append(
-            "- Financial independence age is calculated from the full path to age 90; "
-            "home equity is excluded from FI calculations."
-        )
-
-        if use_barista and barista_age is not None:
-            assumptions.append(
-                f"- Barista bridge: contributions stop at age {barista_age}. "
-                f"Part-time income `${barista_income_today:,.0f}`/yr, extra health `${extra_health_today:,.0f}`/yr, "
-                f"{barista_tax_rate_bridge*100:.0f}% withdrawal tax, and an approximate taxable-need "
-                f"of ${barista_pv_bridge_need_real:,.0f} for the bridge period."
-            )
-
-        if assumptions:
-            st.markdown("**Key assumptions & notes**")
-            st.markdown("\n".join(assumptions))
-
         # Net worth decomposition chart
         color_net_contrib = "#C8A77A"
         color_invest_growth = "#3A6EA5"
@@ -1530,7 +1448,7 @@ def main():
                 x=df_income["Age"],
                 y=df_income["IncomeRealAfterTax"],
                 mode="lines",
-                name="Income (after all taxes, real)",
+                name="Income (after all taxes)",
             )
         )
         fig_inc.add_trace(
@@ -1538,7 +1456,7 @@ def main():
                 x=df_income["Age"],
                 y=df_income["ExpensesReal"],
                 mode="lines",
-                name="Expenses (real)",
+                name="Expenses",
             )
         )
         fig_inc.add_trace(
@@ -1546,7 +1464,7 @@ def main():
                 x=df_income["Age"],
                 y=df_income["InvestableRealAnnual"],
                 mode="lines",
-                name="Annual investable (real)",
+                name="Annual investable",
             )
         )
 
@@ -1559,13 +1477,13 @@ def main():
 
         fig_inc.update_layout(
             title=dict(
-                text="Income, expenses, and investable cash over time (real, after tax)",
+                text="Income, expenses, and investable cash over time",
                 x=0.5,
                 xanchor="center",
                 font=dict(size=18),
             ),
             xaxis_title="Age (years)",
-            yaxis_title="Amount per year ($, real)",
+            yaxis_title="Amount per year ($)",
             yaxis=dict(range=[0, y_max_inc], tickprefix="$"),
             margin=dict(l=40, r=40, t=60, b=40),
             legend=dict(
@@ -1605,13 +1523,13 @@ def main():
                 else:
                     base_c_real = 0.0
 
-                extra_c_real = extra_per_month
-                total_c_real = base_c_real + extra_c_real
+                total_c_real = base_c_real + extra_per_month
 
+                # Same nominal/real logic fix as main path
                 if show_real and infl_rate > 0:
-                    c_nominal = total_c_real
-                else:
                     c_nominal = total_c_real * ((1 + infl_rate) ** y)
+                else:
+                    c_nominal = total_c_real
 
                 monthly_contrib_by_year_extra.append(c_nominal)
 
@@ -1684,6 +1602,79 @@ def main():
             hide_index=True,
             use_container_width=True,
         )
+
+        # -------- Key assumptions moved to bottom --------
+        assumptions = []
+
+        if len(df_income) > 0:
+            first_row = df_income.iloc[0]
+            assumptions.append(
+                f"- Current income model (after income tax + FICA + state): income ≈ "
+                f"${first_row['IncomeRealAfterTax']:,.0f}/yr, expenses ≈ "
+                f"${first_row['ExpensesReal']:,.0f}/yr, investable ≈ "
+                f"${first_row['InvestableRealAnnual']:,.0f}/yr "
+                f"({first_row['SavingsRate']*100:.1f}% savings rate on after-tax income)."
+            )
+        assumptions.append(
+            f"- Pre-tax income grows at {income_growth_rate*100:.1f}%/yr; "
+            f"expenses grow at {expense_growth_rate*100:.1f}%/yr above inflation."
+        )
+
+        if use_kid_expenses:
+            assumptions.append(
+                f"- Kid expenses: ages **{kids_start_age}–{kids_end_age}**, "
+                f"{num_kids} kid(s) at `${annual_cost_per_kid_today:,.0f}`/kid/year (today's $)."
+            )
+        if use_car_expenses:
+            assumptions.append(
+                f"- Cars: `${car_cost_today:,.0f}` (today's $) starting at age **{first_car_age}** "
+                f"every **{car_interval_years}** years."
+            )
+
+        if include_home:
+            if home_status == "I already own a home":
+                assumptions.append(
+                    f"- Home: currently worth `${current_home_value_today:,.0f}`, "
+                    f"current equity `${equity_amount_now:,.0f}`, "
+                    f"{years_remaining_loan} years remaining at **{mortgage_rate*100:.2f}%**."
+                )
+            else:
+                assumptions.append(
+                    f"- Home: purchase at age **{planned_purchase_age}**, today's price `${home_price_today:,.0f}`, "
+                    f"down `{down_payment_pct*100:.1f}%`, {mortgage_rate*100:.2f}% mortgage over {mortgage_term_years} years, "
+                    f"{home_app_rate*100:.1f}%/yr appreciation, {maintenance_pct*100:.1f}% maintenance."
+                )
+                assumptions.append(
+                    f"- After purchase: housing cost uses mortgage payment + estimated property tax/insurance "
+                    f"of `${est_prop_tax_monthly*12:,.0f}`/yr compared with current rent `${current_rent:,.0f}`/month. "
+                    "The difference is modeled as additional annual housing expense."
+                )
+
+        if show_real and infl_rate > 0:
+            assumptions.append(
+                f"- All values shown in today's dollars using **{infl_rate*100:.1f}%** inflation."
+            )
+
+        assumptions.append(
+            "- Age-based glide path for returns: higher expected nominal returns early in your career, "
+            "gradually de-risking as you approach and pass traditional FI age."
+        )
+        assumptions.append(
+            "- Financial independence age is calculated from the full path to age 90; "
+            "home equity is excluded from FI calculations."
+        )
+
+        if use_barista and barista_age is not None:
+            assumptions.append(
+                f"- Barista bridge: contributions stop at age {barista_age}. "
+                f"Part-time income `${barista_income_today:,.0f}`/yr, extra health `${extra_health_today:,.0f}`/yr, "
+                f"{barista_tax_rate_bridge*100:.0f}% withdrawal tax, and an approximate taxable-need "
+                f"of ${barista_pv_bridge_need_real:,.0f} for the bridge period."
+            )
+
+        if assumptions:
+            st.markdown("**Key assumptions & notes**")
+            st.markdown("\n".join(assumptions))
 
 
 if __name__ == "__main__":
