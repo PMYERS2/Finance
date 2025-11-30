@@ -751,33 +751,33 @@ with fi_col:
 
     if fi_annual_spend_today > 0 and base_swr_30yr > 0:
         # ---- Full FI (no earned income) ----
-     # NEW – start from the user’s base 30-year SWR, not from retirement_age
-swr0 = base_swr_30yr
+        # Start with the user's base SWR, independent of retirement_age
+        swr0 = base_swr_30yr
 
-fi_age0, fi_pv0, fi_req0 = compute_fi_age(
-    df, fi_annual_spend_today, infl_rate, show_real, swr0
-)
-
-if fi_age0 is not None:
-    horizon0 = max(90 - fi_age0, 1)
-    swr1 = adjusted_swr_for_horizon(horizon0, base_30yr_swr=base_swr_30yr)
-
-    if abs(swr1 - swr0) > 1e-4:
-        fi_age1, fi_pv1, fi_req1 = compute_fi_age(
-            df, fi_annual_spend_today, infl_rate, show_real, swr1
+        fi_age0, fi_pv0, fi_req0 = compute_fi_age(
+            df, fi_annual_spend_today, infl_rate, show_real, swr0
         )
-        if fi_age1 is not None:
-            fi_age, fi_portfolio, fi_required = fi_age1, fi_pv1, fi_req1
-            horizon_years = max(90 - fi_age1, 1)
-            effective_swr = swr1
-        else:
-            fi_age, fi_portfolio, fi_required = fi_age0, fi_pv0, fi_req0
-            horizon_years = max(90 - fi_age0, 1)
-            effective_swr = swr0
-    else:
-        fi_age, fi_portfolio, fi_required = fi_age0, fi_pv0, fi_req0
-        horizon_years = max(90 - fi_age0, 1)
-        effective_swr = swr0
+
+        if fi_age0 is not None:
+            horizon0 = max(90 - fi_age0, 1)
+            swr1 = adjusted_swr_for_horizon(horizon0, base_30yr_swr=base_swr_30yr)
+
+            if abs(swr1 - swr0) > 1e-4:
+                fi_age1, fi_pv1, fi_req1 = compute_fi_age(
+                    df, fi_annual_spend_today, infl_rate, show_real, swr1
+                )
+                if fi_age1 is not None:
+                    fi_age, fi_portfolio, fi_required = fi_age1, fi_pv1, fi_req1
+                    horizon_years = max(90 - fi_age1, 1)
+                    effective_swr = swr1
+                else:
+                    fi_age, fi_portfolio, fi_required = fi_age0, fi_pv0, fi_req0
+                    horizon_years = horizon0
+                    effective_swr = swr0
+            else:
+                fi_age, fi_portfolio, fi_required = fi_age0, fi_pv0, fi_req0
+                horizon_years = horizon0
+                effective_swr = swr0
 
         # ---- Barista FI (part-time income only until barista_end_age) ----
         if use_barista and barista_income_today > 0:
@@ -1148,4 +1148,3 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
-
