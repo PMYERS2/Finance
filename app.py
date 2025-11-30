@@ -20,14 +20,6 @@ def compound_schedule(
 
     monthly_contrib_by_year: list length = years, monthly contribution for each year (nominal)
     annual_expense_by_year:  list length = years, nominal $ expense taken at year-end
-
-    Tracks:
-      - CumContributions: cumulative contributions
-      - ContribYear: contributions during that year
-      - InvestGrowth: cumulative market return BEFORE expenses
-      - InvestGrowthYear: market return during that year
-      - ExpenseDrag: cumulative negative impact of expenses
-      - NetGrowth: InvestGrowth + ExpenseDrag
     """
     r = annual_rate
     m = 12
@@ -141,10 +133,8 @@ def compute_fi_age_horizon(
         multiple = 1.0 / swr
 
         if show_real and infl_rate > 0:
-            # Everything already in today's dollars -> no inflation factor
             required = fi_annual_spend_today * multiple
         else:
-            # Nominal path -> inflate spending to year t
             required = fi_annual_spend_today * ((1 + infl_rate) ** year) * multiple
 
         if balance >= required:
@@ -156,6 +146,94 @@ def compute_fi_age_horizon(
             break
 
     return fi_age, fi_portfolio, fi_required, eff_swr, horizon_years
+
+
+def compute_barista_fi_age(
+    df,
+    fi_annual_spend_today,   # S
+    barista_income_today,    # B
+    infl_rate,
+    show_real,
+    base_30yr_swr,
+    barista_start_age,
+    barista_end_age,
+    horizon_end_age=90,
+):
+    """
+    Find earliest age where you can switch to part-time and stay FI
+    through `horizon_end_age` using a horizon-aware SWR.
+
+    Returns (barista_age, portfolio, required, eff_swr, horizon_years)
+    or (None, None, None, None, None) if not reached.
+    """
+    S = fi_annual_spend_today
+    B = barista_income_today
+
+    if S <= 0 or base_30yr_swr <= 0 or B < 0:
+        return None, None, None, None, None
+    if barista_start_age is None or barista_start_age >= horizon_end_age:
+        return None, None, None, None, None
+
+    barista_age = None
+    barista_portfolio = None
+    barista_required = None
+    barista_eff_swr = None
+    barista_horizon_years = None
+
+    for row in df.itertuples():
+        age = row.Age
+        year = row.Year
+        balance = row.Balance
+
+        if age < barista_start_age:
+            continue
+        if age >= horizon_end_age:
+            continue
+
+        # Years remaining from this age
+        T = max(horizon_end_age - age, 1)
+
+        # Years with barista work within this horizon
+        years_barista = max(0, min(barista_end_age - age, T))
+        years_post_barista = T - years_barista
+
+        # Portfolio-funded spending during barista years
+        S_bar_today = max(S - B, 0.0)
+
+        # Equivalent constant real draw
+        S_eff_today = (
+            S_bar_today * years_barista + S * years_post_barista
+        ) / T
+
+        if S_eff_today <= 0:
+            required_i = 0.0
+            swr_i = base_30yr_swr
+        else:
+            swr_i = adjusted_swr_for_horizon(T, base_30yr_swr=base_30yr_swr)
+            multiple_i = 1.0 / swr_i
+
+            if show_real and infl_rate > 0:
+                required_i = S_eff_today * multiple_i
+            else:
+                required_i = (
+                    S_eff_today * ((1 + infl_rate) ** year) * multiple_i
+                )
+
+        if balance >= required_i:
+            barista_age = int(age)
+            barista_portfolio = balance
+            barista_required = required_i
+            barista_horizon_years = T
+            barista_eff_swr = swr_i
+            break
+
+    return (
+        barista_age,
+        barista_portfolio,
+        barista_required,
+        barista_eff_swr,
+        barista_horizon_years,
+    )
 
 
 # =========================================================
@@ -693,7 +771,7 @@ if show_real and infl_rate > 0:
 
     for idx in range(len(df_full)):
         c = df_full.loc[idx, "ContribYear"]
-        e = df_full.loc(idx, "AnnualExpense") if False else df_full.loc[idx, "AnnualExpense"]
+        e = df_full.loc[idx, "AnnualExpense"]
 
         cum_contrib_real += c
         cum_expense_drag_real += -e
@@ -709,12 +787,6 @@ else:
     df_full["DF_mid"] = 1.0
 
 label_suffix = " (today's dollars)" if show_real and infl_rate > 0 else " (nominal)"
-
-# Slice for visuals: only up to chosen retirement age
-df_plot = df_full[df_full["Age"] <= retirement_age].reset_index(drop=True)
-
-ending_net_worth = df_plot["NetWorth"].iloc[-1]
-ending_invest_balance = df_plot["Balance"].iloc[-1]
 
 # =========================================================
 # MAIN LAYOUT: left = chart etc., right = FI KPI card
@@ -799,11 +871,13 @@ with fi_col:
     )
 
     # ---------------- Barista FI (horizon-aware, using full df) --------------------
-    barista_age = None
-    barista_portfolio = None
-    barista_required = None
-    barista_effective_swr = None
-    barista_horizon_years = None
+    (
+        barista_age,
+        barista_portfolio,
+        barista_required,
+        barista_effective_swr,
+        barista_horizon_years,
+    ) = (None, None, None, None, None)
 
     if (
         use_barista
@@ -812,54 +886,23 @@ with fi_col:
         and fi_annual_spend_today > 0
         and base_swr_30yr > 0
     ):
-        S = fi_annual_spend_today
-        B = barista_income_today
-
-        for row in df_full.itertuples():
-            age = row.Age
-            year = row.Year
-            balance = row.Balance
-
-            if age >= max_sim_age:
-                continue
-            if age < barista_start_age:
-                continue
-
-            T = max(max_sim_age - age, 1)
-
-            years_barista = max(0, min(barista_end_age - age, T))
-            years_post_barista = T - years_barista
-
-            S_bar_today = max(S - B, 0.0)
-
-            S_eff_today = (
-                S_bar_today * years_barista + S * years_post_barista
-            ) / T
-
-            if S_eff_today <= 0:
-                required_portfolio_i = 0.0
-            else:
-                swr_i = adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
-                multiple_i = 1.0 / swr_i
-
-                if show_real and infl_rate > 0:
-                    required_portfolio_i = S_eff_today * multiple_i
-                else:
-                    required_portfolio_i = (
-                        S_eff_today * ((1 + infl_rate) ** year) * multiple_i
-                    )
-
-            if balance >= required_portfolio_i:
-                barista_age = int(age)
-                barista_portfolio = balance
-                barista_required = required_portfolio_i
-                barista_horizon_years = T
-                barista_effective_swr = (
-                    adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
-                    if S_eff_today > 0
-                    else base_swr_30yr
-                )
-                break
+        (
+            barista_age,
+            barista_portfolio,
+            barista_required,
+            barista_effective_swr,
+            barista_horizon_years,
+        ) = compute_barista_fi_age(
+            df_full,
+            fi_annual_spend_today,
+            barista_income_today,
+            infl_rate,
+            show_real,
+            base_swr_30yr,
+            barista_start_age,
+            barista_end_age,
+            horizon_end_age=max_sim_age,
+        )
 
     # ---------------- Render FI card -------------------
     if fi_age is not None:
@@ -927,6 +970,35 @@ with fi_col:
         )
 
 # -----------------------------
+# Build Barista income schedule (per year) for table/plots
+# -----------------------------
+barista_income_series = []
+for row in df_full.itertuples():
+    age = row.Age
+    year = row.Year
+    if (
+        use_barista
+        and barista_income_today > 0
+        and barista_start_age is not None
+        and barista_start_age <= age <= barista_end_age
+    ):
+        if show_real and infl_rate > 0:
+            income = barista_income_today  # already in today's $
+        else:
+            income = barista_income_today * ((1 + infl_rate) ** year)
+    else:
+        income = 0.0
+    barista_income_series.append(income)
+
+df_full["BaristaIncome"] = barista_income_series
+
+# Slice for visuals: only up to chosen retirement age
+df_plot = df_full[df_full["Age"] <= retirement_age].reset_index(drop=True)
+
+ending_net_worth = df_plot["NetWorth"].iloc[-1]
+ending_invest_balance = df_plot["Balance"].iloc[-1]
+
+# -----------------------------
 # LEFT COLUMN: main content (uses df_plot up to retirement age)
 # -----------------------------
 with main_left:
@@ -989,7 +1061,7 @@ with main_left:
         "home equity is excluded from FI calculations."
     )
 
-    if use_barista:
+    if use_barista and barista_start_age is not None:
         assumptions.append(
             f"- Barista FIRE: assumes part-time income of `${barista_income_today:,.0f}`/year "
             f"from age {barista_start_age} to {barista_end_age}. "
@@ -1193,6 +1265,7 @@ with main_left:
     display_df["Home Equity"] = display_df["HomeEquity"]
     display_df["Contributions"] = display_df["ContribYear"]
     display_df["AdditionalAnnualExpense"] = display_df["AnnualExpense"]
+    display_df["Barista Income"] = display_df["BaristaIncome"]
     display_df["Investment Growth"] = display_df["InvestGrowthYear"]
     display_df["Net Worth"] = display_df["NetWorth"]
 
@@ -1204,6 +1277,7 @@ with main_left:
         "Home Equity",
         "Contributions",
         "AdditionalAnnualExpense",
+        "Barista Income",
         "Investment Growth",
         "Net Worth",
     ]
@@ -1216,6 +1290,7 @@ with main_left:
                 "Home Equity": "${:,.0f}",
                 "Contributions": "${:,.0f}",
                 "AdditionalAnnualExpense": "${:,.0f}",
+                "Barista Income": "${:,.0f}",
                 "Investment Growth": "${:,.0f}",
                 "Net Worth": "${:,.0f}",
             }
