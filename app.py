@@ -115,10 +115,12 @@ def compute_fi_age(df, fi_annual_spend_today, infl_rate, show_real, swr):
     fi_multiple = 1.0 / swr
 
     if show_real and infl_rate > 0:
+        # Real mode: portfolio and spending already in today's dollars
         required_by_year = [
             fi_annual_spend_today * fi_multiple for _ in df["Year"]
         ]
     else:
+        # Nominal mode: grow spending with inflation
         required_by_year = [
             fi_annual_spend_today * ((1 + infl_rate) ** year) * fi_multiple
             for year in df["Year"]
@@ -779,53 +781,58 @@ with fi_col:
                 horizon_years = horizon0
                 effective_swr = swr0
 
-        # ---- Barista FI (part-time income only until barista_end_age) ----
+        # ---- Barista FI (part-time income until barista_end_age) ----
         if use_barista and barista_income_today > 0:
             S = fi_annual_spend_today
             B = barista_income_today
 
-            for row in df.itertuples():
-                age = row.Age
-                year = row.Year
-                balance = row.Balance
+            if B >= S:
+                # Part-time income fully covers target spending while working;
+                # you still need full FI later, so Barista FI age = full FI age.
+                if fi_age is not None:
+                    barista_age = fi_age
+                    barista_portfolio = fi_portfolio
+                    barista_required = fi_required
+                    barista_horizon_years = horizon_years
+                    barista_effective_swr = effective_swr
+            else:
+                for row in df.itertuples():
+                    age = row.Age
+                    year = row.Year
+                    balance = row.Balance
 
-                if age >= 90:
-                    continue
+                    if age >= 90:
+                        continue
 
-                T = max(90 - age, 1)  # total horizon from this age to 90
-                T_barista = max(0, min(T, barista_end_age - age))
+                    # How much must the portfolio cover at this age (today's dollars)
+                    if age <= barista_end_age:
+                        S_from_portfolio_today = S - B
+                    else:
+                        S_from_portfolio_today = S
 
-                # Effective average required spending from portfolio over the full horizon
-                S_eff_today = S - (B * T_barista / T)
+                    if S_from_portfolio_today <= 0:
+                        # Shouldn't happen here because we already handled B >= S,
+                        # but guard anyway.
+                        continue
 
-                if S_eff_today <= 0:
-                    # Barista income alone covers spending; treat this as immediate barista FI
-                    barista_age = int(age)
-                    barista_portfolio = balance
-                    barista_required = 0.0
-                    barista_horizon_years = T
-                    barista_effective_swr = adjusted_swr_for_horizon(
-                        T, base_30yr_swr=base_swr_30yr
-                    )
-                    break
+                    T = max(90 - age, 1)
+                    swr_i = adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
+                    multiple_i = 1.0 / swr_i
 
-                swr_i = adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
-                multiple_i = 1.0 / swr_i
+                    if show_real and infl_rate > 0:
+                        required_portfolio_i = S_from_portfolio_today * multiple_i
+                    else:
+                        required_portfolio_i = (
+                            S_from_portfolio_today * ((1 + infl_rate) ** year) * multiple_i
+                        )
 
-                if show_real and infl_rate > 0:
-                    required_portfolio_i = S_eff_today * multiple_i
-                else:
-                    required_portfolio_i = (
-                        S_eff_today * ((1 + infl_rate) ** year) * multiple_i
-                    )
-
-                if balance >= required_portfolio_i:
-                    barista_age = int(age)
-                    barista_portfolio = balance
-                    barista_required = required_portfolio_i
-                    barista_horizon_years = T
-                    barista_effective_swr = swr_i
-                    break
+                    if balance >= required_portfolio_i:
+                        barista_age = int(age)
+                        barista_portfolio = balance
+                        barista_required = required_portfolio_i
+                        barista_horizon_years = T
+                        barista_effective_swr = swr_i
+                        break
 
     if fi_age is not None:
         # Optional Barista line
@@ -1030,7 +1037,7 @@ with main_left:
             x=0.5,
             xanchor="center",
             font=dict(size=18),
-            pad=dict(b=10),  # padding below title
+            pad=dict(b=10),
         ),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
@@ -1061,7 +1068,7 @@ with main_left:
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=0.96,  # move legend slightly down from title
+            y=0.96,
             xanchor="center",
             x=0.5,
             font=dict(size=12),
@@ -1171,4 +1178,3 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
-
