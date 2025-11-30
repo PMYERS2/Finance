@@ -991,55 +991,6 @@ with main_left:
             hovertemplate="Age %{x}<br>Home equity: $%{y:,.0f}<extra></extra>",
         )
     )
-    highlight_color = "#FFD700"  # gold
-normal_net = color_net_contrib
-normal_growth = color_invest_growth
-normal_home = color_home
-
-highlight_mask = df["NetWorth"] >= 1_000_000
-if highlight_mask.any():
-    first_million_index = highlight_mask.idxmax()
-else:
-    first_million_index = None
-
-# Net contributions bar
-fig.add_trace(
-    go.Bar(
-        x=df["Age"],
-        y=df["NetContributions"],
-        name="Net contributions (after expenses)",
-        marker_color=[
-            highlight_color if idx == first_million_index else normal_net
-            for idx in df.index
-        ],
-    )
-)
-
-# Investment growth
-fig.add_trace(
-    go.Bar(
-        x=df["Age"],
-        y=df["InvestGrowth"],
-        name="Investment growth (cumulative)",
-        marker_color=[
-            highlight_color if idx == first_million_index else normal_growth
-            for idx in df.index
-        ],
-    )
-)
-
-# Home equity
-fig.add_trace(
-    go.Bar(
-        x=df["Age"],
-        y=df["HomeEquity"],
-        name="Home equity",
-        marker_color=[
-            highlight_color if idx == first_million_index else normal_home
-            for idx in df.index
-        ],
-    )
-)
 
     ages = df["Age"].tolist()
     tickvals = []
@@ -1193,8 +1144,6 @@ fig.add_trace(
         hide_index=True,
         use_container_width=True,
     )
-
-
 
 
 
