@@ -720,6 +720,7 @@ with fi_col:
     )
 
     barista_income_today = 0.0
+    barista_start_age = None
     barista_end_age = 65
 
     if use_barista:
@@ -738,6 +739,14 @@ with fi_col:
             step=1,
             key="barista_end_age",
         )
+        barista_start_age = st.number_input(
+            "Earliest age you switch to part-time",
+            value=max(current_age + 5, current_age + 1),
+            min_value=current_age + 1,
+            max_value=barista_end_age,
+            step=1,
+            key="barista_start_age",
+        )
 
     fi_age = None
     fi_portfolio = None
@@ -753,7 +762,6 @@ with fi_col:
 
     if fi_annual_spend_today > 0 and base_swr_30yr > 0:
         # ---- Full FI (no earned income) ----
-        # Start with the user's base SWR, independent of retirement_age
         swr0 = base_swr_30yr
 
         fi_age0, fi_pv0, fi_req0 = compute_fi_age(
@@ -781,69 +789,71 @@ with fi_col:
                 horizon_years = horizon0
                 effective_swr = swr0
 
-        # ---- Barista FI (part-time income until barista_end_age) ----
-        if use_barista and barista_income_today > 0:
+        # ---- Barista FI (choose when you can start part-time and still reach FI) ----
+        if use_barista and barista_income_today > 0 and barista_start_age is not None:
             S = fi_annual_spend_today
             B = barista_income_today
 
-            if B >= S:
-                # Part-time income fully covers target spending while working;
-                # you still need full FI later, so Barista FI age = full FI age.
-                if fi_age is not None:
-                    barista_age = fi_age
-                    barista_portfolio = fi_portfolio
-                    barista_required = fi_required
-                    barista_horizon_years = horizon_years
-                    barista_effective_swr = effective_swr
-            else:
-                for row in df.itertuples():
-                    age = row.Age
-                    year = row.Year
-                    balance = row.Balance
+            for row in df.itertuples():
+                age = row.Age
+                year = row.Year
+                balance = row.Balance
 
-                    if age >= 90:
-                        continue
+                if age >= 90:
+                    continue
+                if age < barista_start_age:
+                    continue
 
-                    # How much must the portfolio cover at this age (today's dollars)
-                    if age <= barista_end_age:
-                        S_from_portfolio_today = S - B
-                    else:
-                        S_from_portfolio_today = S
+                T = max(90 - age, 1)
 
-                    if S_from_portfolio_today <= 0:
-                        # Shouldn't happen here because we already handled B >= S,
-                        # but guard anyway.
-                        continue
+                # Years with barista income between this age and barista_end_age
+                years_barista = max(0, min(barista_end_age - age, T))
+                years_post_barista = T - years_barista
 
-                    T = max(90 - age, 1)
+                # Spending that must come from portfolio in barista years (today's $)
+                S_bar_today = max(S - B, 0.0)
+
+                # Average effective portfolio-funded spending over full horizon
+                S_eff_today = (
+                    S_bar_today * years_barista + S * years_post_barista
+                ) / T
+
+                if S_eff_today <= 0:
+                    required_portfolio_i = 0.0
+                else:
                     swr_i = adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
                     multiple_i = 1.0 / swr_i
 
                     if show_real and infl_rate > 0:
-                        required_portfolio_i = S_from_portfolio_today * multiple_i
+                        required_portfolio_i = S_eff_today * multiple_i
                     else:
                         required_portfolio_i = (
-                            S_from_portfolio_today * ((1 + infl_rate) ** year) * multiple_i
+                            S_eff_today * ((1 + infl_rate) ** year) * multiple_i
                         )
 
-                    if balance >= required_portfolio_i:
-                        barista_age = int(age)
-                        barista_portfolio = balance
-                        barista_required = required_portfolio_i
-                        barista_horizon_years = T
-                        barista_effective_swr = swr_i
-                        break
+                if balance >= required_portfolio_i:
+                    barista_age = int(age)
+                    barista_portfolio = balance
+                    barista_required = required_portfolio_i
+                    barista_horizon_years = T
+                    barista_effective_swr = (
+                        adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
+                        if S_eff_today > 0
+                        else base_swr_30yr
+                    )
+                    break
 
     if fi_age is not None:
         # Optional Barista line
         if use_barista and barista_age is not None:
             barista_line = (
-                f"Barista FI age with ${barista_income_today:,.0f}/yr earned until age {barista_end_age}: "
-                f"{barista_age}"
+                f"Barista FI: you can switch to part-time as early as age {barista_age} "
+                f"with ${barista_income_today:,.0f}/yr until age {barista_end_age}."
             )
         elif use_barista:
             barista_line = (
-                f"Barista FI age with ${barista_income_today:,.0f}/yr earned until age {barista_end_age}: not reached"
+                f"Barista FI with ${barista_income_today:,.0f}/yr until age {barista_end_age}: not reached "
+                f"given this barista start age setting."
             )
         else:
             barista_line = ""
@@ -958,7 +968,8 @@ with main_left:
     if use_barista:
         assumptions.append(
             f"- Barista FIRE: assumes part-time income of `${barista_income_today:,.0f}`/year "
-            f"until age {barista_end_age}; portfolio withdrawals are reduced during those years."
+            f"from age {barista_start_age} to {barista_end_age}. "
+            "The calculator finds the earliest age you can switch to part-time and still be on track for FI by age 90."
         )
 
     if assumptions:
