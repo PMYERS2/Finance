@@ -866,18 +866,28 @@ def main():
                 min_value=0,
                 key="barista_income",
             )
+
+            # Clamp default end age into [current_age+1, retirement_age]
+            min_end_age = current_age + 1
+            max_end_age = retirement_age
+            default_end_age = min(max(65, min_end_age), max_end_age)
+
             barista_end_age = st.number_input(
                 "End age for part-time work",
-                value=65,
-                min_value=current_age + 1,
-                max_value=retirement_age,
+                value=default_end_age,
+                min_value=min_end_age,
+                max_value=max_end_age,
                 step=1,
                 key="barista_end_age",
             )
+
+            # Start age must be <= selected end age
+            default_start_age = min(max(current_age + 5, min_end_age), barista_end_age)
+
             barista_start_age = st.number_input(
                 "Earliest age you switch to part-time",
-                value=max(current_age + 5, current_age + 1),
-                min_value=current_age + 1,
+                value=default_start_age,
+                min_value=min_end_age,
                 max_value=barista_end_age,
                 step=1,
                 key="barista_start_age",
