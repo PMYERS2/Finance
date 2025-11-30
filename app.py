@@ -712,12 +712,14 @@ with fi_col:
 
     # Barista FIRE controls
     use_barista = st.checkbox(
-        "Show Part-Time income in FI",
+        "Show Barista FIRE scenario (part-time income in FI)",
         value=False,
         key="barista_toggle",
     )
 
     barista_income_today = 0.0
+    barista_end_age = 65
+
     if use_barista:
         barista_income_today = st.number_input(
             "Expected part-time income in FI ($/yr, today's)",
@@ -725,6 +727,14 @@ with fi_col:
             step=5000,
             min_value=0,
             key="barista_income",
+        )
+        barista_end_age = st.number_input(
+            "End age for part-time work",
+            value=65,
+            min_value=current_age + 1,
+            max_value=90,
+            step=1,
+            key="barista_end_age",
         )
 
     fi_age = None
@@ -769,58 +779,64 @@ with fi_col:
                 horizon_years = horizon0
                 effective_swr = swr0
 
-        # ---- Barista FI (part-time income reduces required withdrawal) ----
-        if use_barista:
-            required_from_portfolio_today = max(
-                0.0, fi_annual_spend_today - barista_income_today
-            )
-            if required_from_portfolio_today > 0:
-                barista_age0, barista_pv0, barista_req0 = compute_fi_age(
-                    df, required_from_portfolio_today, infl_rate, show_real, swr0
-                )
-                if barista_age0 is not None:
-                    barista_h0 = max(90 - barista_age0, 1)
-                    barista_swr1 = adjusted_swr_for_horizon(
-                        barista_h0, base_30yr_swr=base_swr_30yr
+        # ---- Barista FI (part-time income only until barista_end_age) ----
+        if use_barista and barista_income_today > 0:
+            S = fi_annual_spend_today
+            B = barista_income_today
+
+            for row in df.itertuples():
+                age = row.Age
+                year = row.Year
+                balance = row.Balance
+
+                if age >= 90:
+                    continue
+
+                T = max(90 - age, 1)  # total horizon from this age to 90
+                T_barista = max(0, min(T, barista_end_age - age))
+
+                # Effective average required spending from portfolio over the full horizon
+                S_eff_today = S - (B * T_barista / T)
+
+                if S_eff_today <= 0:
+                    # Barista income alone covers spending; treat this as immediate barista FI
+                    barista_age = int(age)
+                    barista_portfolio = balance
+                    barista_required = 0.0
+                    barista_horizon_years = T
+                    barista_effective_swr = adjusted_swr_for_horizon(
+                        T, base_30yr_swr=base_swr_30yr
                     )
-                    if abs(barista_swr1 - swr0) > 1e-4:
-                        barista_age1, barista_pv1, barista_req1 = compute_fi_age(
-                            df,
-                            required_from_portfolio_today,
-                            infl_rate,
-                            show_real,
-                            barista_swr1,
-                        )
-                        if barista_age1 is not None:
-                            barista_age = barista_age1
-                            barista_portfolio = barista_pv1
-                            barista_required = barista_req1
-                            barista_horizon_years = barista_h0
-                            barista_effective_swr = barista_swr1
-                        else:
-                            barista_age = barista_age0
-                            barista_portfolio = barista_pv0
-                            barista_required = barista_req0
-                            barista_horizon_years = barista_h0
-                            barista_effective_swr = swr0
-                    else:
-                        barista_age = barista_age0
-                        barista_portfolio = barista_pv0
-                        barista_required = barista_req0
-                        barista_horizon_years = barista_h0
-                        barista_effective_swr = swr0
+                    break
+
+                swr_i = adjusted_swr_for_horizon(T, base_30yr_swr=base_swr_30yr)
+                multiple_i = 1.0 / swr_i
+
+                if show_real and infl_rate > 0:
+                    required_portfolio_i = S_eff_today * multiple_i
+                else:
+                    required_portfolio_i = (
+                        S_eff_today * ((1 + infl_rate) ** year) * multiple_i
+                    )
+
+                if balance >= required_portfolio_i:
+                    barista_age = int(age)
+                    barista_portfolio = balance
+                    barista_required = required_portfolio_i
+                    barista_horizon_years = T
+                    barista_effective_swr = swr_i
+                    break
 
     if fi_age is not None:
         # Optional Barista line
         if use_barista and barista_age is not None:
             barista_line = (
-                f"Barista FI age with ${barista_income_today:,.0f}/yr earned: "
-                f"{barista_age} "
-                f"(needs ≈ ${barista_required:,.0f}/yr from portfolio)"
+                f"Barista FI age with ${barista_income_today:,.0f}/yr earned until age {barista_end_age}: "
+                f"{barista_age}"
             )
         elif use_barista:
             barista_line = (
-                f"Barista FI age with ${barista_income_today:,.0f}/yr earned: not reached"
+                f"Barista FI age with ${barista_income_today:,.0f}/yr earned until age {barista_end_age}: not reached"
             )
         else:
             barista_line = ""
@@ -934,8 +950,8 @@ with main_left:
 
     if use_barista:
         assumptions.append(
-            f"- Barista FIRE scenario optionally reduces required withdrawals by "
-            f"`${barista_income_today:,.0f}`/year of part-time income."
+            f"- Barista FIRE: assumes part-time income of `${barista_income_today:,.0f}`/year "
+            f"until age {barista_end_age}; portfolio withdrawals are reduced during those years."
         )
 
     if assumptions:
@@ -1026,10 +1042,10 @@ with main_left:
     )
 
     # minimal annotation on last bar, slightly above the stack
-    last_age = df["Age"].iloc[-1]
     stacked_heights = (
         df["NetContributions"] + df["InvestGrowth"] + df["HomeEquity"]
     )
+    last_age = df["Age"].iloc[-1]
     last_bar_height = stacked_heights.iloc[-1]
     max_bar_height = stacked_heights.max()
     label_y = last_bar_height + max_bar_height * 0.03  # 3% above bar
@@ -1132,5 +1148,3 @@ with main_left:
         hide_index=True,
         use_container_width=True,
     )
-
-
