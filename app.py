@@ -421,10 +421,10 @@ def main():
 
     retirement_age_input = st.sidebar.number_input(
         "Traditional FI age (years – when you stop all work)",
-            value=60,
-            min_value=1,
-            max_value=100,
-            step=1,
+        value=60,
+        min_value=1,
+        max_value=100,
+        step=1,
     )
 
     max_sim_age = 90
@@ -870,7 +870,7 @@ def main():
         age = current_age + y
         annual_rates_by_year_full.append(glide_path_return(age, annual_rate_base))
 
-    # Contributions (nominal in simulation) – full-path used for FI math
+    # Full-path contributions (used for FI math)
     monthly_contrib_by_year_full = []
     for y in range(years_full):
         age = current_age + y
@@ -1041,7 +1041,6 @@ def main():
 
     if show_real and infl_rate > 0:
         df_full["DF_end"] = (1 + infl_rate) ** df_full["Year"]
-        df_full["DF_mid"] = (1 + infl_rate) ** (df_full["Year"] - 1)
 
         for col in [
             "Balance",
@@ -1073,7 +1072,6 @@ def main():
             df_full.loc[idx, "NetContributions"] = net_contrib_cum_real
     else:
         df_full["DF_end"] = 1.0
-        df_full["DF_mid"] = 1.0
 
     label_suffix = " (today's dollars)" if show_real and infl_rate > 0 else " (nominal)"
 
@@ -1138,7 +1136,7 @@ def main():
     # ---- Layout columns (we'll fill fi_col after chart path is built) ----
     main_left, fi_col = st.columns([4, 2])
 
-    # Barista income series (on base df_full)
+    # Barista income series on base path (for info; not used in chart sim)
     barista_income_series = []
     for row in df_full.itertuples():
         age = row.Age
@@ -1199,12 +1197,56 @@ def main():
         else:
             monthly_contrib_by_year_chart.append(0.0)
 
-    # Re-run compound schedule for chart path using modified contributions
+    # Build expenses schedule for chart path:
+    # start from base expenses, then overlay FI/Barista withdrawals.
+    annual_expense_by_year_chart = annual_expense_by_year_nominal_full.copy()
+
+    for year_idx in range(years_full):
+        age_end = current_age + year_idx + 1
+
+        extra_spend_real = 0.0
+
+        # If stop at FI age: from FI age to retirement slider, withdraw full FI spend
+        if (
+            stop_choice == "FI independence age"
+            and fi_age is not None
+            and fi_annual_spend_today > 0
+            and age_end >= fi_age
+            and age_end <= retirement_age
+        ):
+            extra_spend_real = fi_annual_spend_today
+
+        # If stop at Barista age: from Barista age to retirement slider, withdraw net spend
+        elif (
+            stop_choice == "Part Time Work FI Independence Age"
+            and use_barista
+            and barista_age is not None
+            and fi_annual_spend_today > 0
+            and age_end >= barista_age
+            and age_end <= retirement_age
+        ):
+            if age_end <= barista_end_age:
+                # During part-time years: FI spend minus PT income + extra health
+                extra_spend_real = max(fi_annual_spend_today - barista_income_today, 0.0) + max(
+                    extra_health_today, 0.0
+                )
+            else:
+                # After part-time but before full FI age slider: full FI spend
+                extra_spend_real = fi_annual_spend_today
+
+        if extra_spend_real > 0:
+            if show_real and infl_rate > 0:
+                extra_spend_nominal = extra_spend_real * ((1 + infl_rate) ** (year_idx + 1))
+            else:
+                extra_spend_nominal = extra_spend_real
+            annual_expense_by_year_chart[year_idx] += extra_spend_nominal
+
+    # Re-run compound schedule for chart path using modified contrib/expense
     df_full_chart = compound_schedule(
         start_balance=start_balance_effective,
         years=years_full,
         monthly_contrib_by_year=monthly_contrib_by_year_chart,
-        annual_expense_by_year=annual_expense_by_year_nominal_full,
+        annual_expense_by_year=annual_expense_by_year_chart,
         annual_rate_by_year=annual_rates_by_year_full,
     )
 
@@ -1221,7 +1263,6 @@ def main():
     # Inflation adjustment for chart path
     if show_real and infl_rate > 0:
         df_full_chart["DF_end"] = (1 + infl_rate) ** df_full_chart["Year"]
-        df_full_chart["DF_mid"] = (1 + infl_rate) ** (df_full_chart["Year"] - 1)
 
         cum_contrib_real = 0.0
         cum_expense_drag_real = 0.0
@@ -1255,7 +1296,6 @@ def main():
             df_full_chart.loc[idx, "NetContributions"] = net_contrib_cum_real
     else:
         df_full_chart["DF_end"] = 1.0
-        df_full_chart["DF_mid"] = 1.0
 
     # Use chart path for visualizations/tables (clipped at traditional FI age)
     df_plot = df_full_chart[df_full_chart["Age"] <= retirement_age].reset_index(drop=True)
@@ -1263,16 +1303,22 @@ def main():
     ending_net_worth = df_plot["NetWorth"].iloc[-1]
     ending_invest_balance = df_plot["Balance"].iloc[-1]
 
-    # ---- Compute FI portfolio on CHART path for display ----
+    # ---- FI / Barista portfolio values on CHART path ----
     fi_portfolio_chart = None
     if fi_age is not None:
-        match = df_full_chart.loc[df_full_chart["Age"] == fi_age]
-        if not match.empty:
-            fi_portfolio_chart = match["Balance"].iloc[0]
+        match_fi = df_full_chart.loc[df_full_chart["Age"] == fi_age]
+        if not match_fi.empty:
+            fi_portfolio_chart = match_fi["Balance"].iloc[0]
 
     fi_portfolio_display = fi_portfolio_chart if fi_portfolio_chart is not None else fi_portfolio_base
 
-    # Right column: FI + Barista KPIs using chart-path portfolio
+    barista_fi_balance_chart = None
+    if use_barista and barista_age is not None:
+        match_bar_fi = df_full_chart.loc[df_full_chart["Age"] == retirement_age]
+        if not match_bar_fi.empty:
+            barista_fi_balance_chart = match_bar_fi["Balance"].iloc[0]
+
+    # Right column: FI + Barista KPIs using chart-path portfolios
     with fi_col:
         st.markdown("### FI and Part-Time Work summary")
 
@@ -1335,14 +1381,16 @@ def main():
                 summary_line = (
                     f"Part-time from age {barista_age} to {barista_end_age} "
                     f"(~{barista_bridge_years:.0f} years) before full FI at age {retirement_age}."
+                    if barista_bridge_years is not None
+                    else f"Part-time starting at age {barista_age} before full FI at age {retirement_age}."
                 )
 
-                target_line = (
-                    f"FI target: ${barista_fi_target_real:,.0f} &bull; "
-                    f"Projected portfolio at FI: ${barista_fi_balance_real:,.0f}"
-                    if barista_fi_target_real is not None and barista_fi_balance_real is not None
-                    else ""
-                )
+                target_line = ""
+                if barista_fi_target_real is not None and barista_fi_balance_chart is not None:
+                    target_line = (
+                        f"FI target: ${barista_fi_target_real:,.0f} &bull; "
+                        f"Projected portfolio at FI (chart path): ${barista_fi_balance_chart:,.0f}"
+                    )
 
                 taxable_line = ""
                 if taxable_ratio_rec is not None and barista_pv_bridge_need_real is not None:
@@ -1405,7 +1453,7 @@ def main():
         )
         st.caption(
             f"(Investments: ${ending_invest_balance:,.0f}; home equity included in net worth. "
-            f"Assumes full-time work stops at age {stop_work_age_for_chart}.)"
+            f"Assumes full-time work stops at age {stop_work_age_for_chart}, with FI/Barista withdrawals applied.)"
         )
 
         # Net worth decomposition chart
@@ -1720,12 +1768,12 @@ def main():
                 }
             )
 
-            if barista_fi_balance_real is not None:
+            if barista_fi_balance_chart is not None:
                 vet_rows.append(
                     {
                         "Scenario": "Full FI (after Part-Time)",
                         "Age": retirement_age,
-                        "Portfolio at Age (chart path)": barista_fi_balance_real,
+                        "Portfolio at Age (chart path)": barista_fi_balance_chart,
                         "Required portfolio": barista_fi_target_real,
                         "Effective SWR": base_swr_30yr,
                         "Years horizon": horizon_years if horizon_years is not None else max_sim_age - retirement_age,
@@ -1811,20 +1859,19 @@ def main():
             "gradually de-risking as you approach and pass traditional FI age."
         )
         assumptions.append(
-            "- Financial independence age is calculated from the full path to age 90; "
+            "- Financial independence age is calculated from the full base path to age 90; "
             "home equity is excluded from FI calculations."
         )
         assumptions.append(
-            f"- Net worth chart contributions stop at age {stop_work_age_for_chart}; "
-            "FI math itself still uses the full base path to age 90."
+            f"- Net worth chart uses the same contribution stop age ({stop_work_age_for_chart}) and "
+            "applies FI/Barista withdrawals directly to the portfolio path shown."
         )
 
-        if use_barista and barista_age is not None:
+        if use_barista and barista_age is not None and barista_pv_bridge_need_real is not None:
             assumptions.append(
-                f"- Part-time bridge: contributions stop at age {barista_age} in the FI bridge logic. "
-                f"Part-time income `${barista_income_today:,.0f}`/yr, extra health `${extra_health_today:,.0f}`/yr, "
-                f"{barista_tax_rate_bridge*100:.0f}% withdrawal tax, and an approximate taxable-need "
-                f"of ${barista_pv_bridge_need_real:,.0f} for the bridge period."
+                f"- Part-time bridge: portfolio withdrawals during the bridge have present value "
+                f"~${barista_pv_bridge_need_real:,.0f}, about {taxable_ratio_rec*100:.0f}% "
+                f"of the portfolio at the Part-Time start age."
             )
 
         if assumptions:
