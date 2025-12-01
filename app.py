@@ -1087,7 +1087,7 @@ def main():
                 fi_annual_spend_today,
                 infl_rate,
                 show_real,
-                base_swr_30yr,
+                base_30yr_swr,
                 horizon_end_age=max_sim_age,
             )
         )
@@ -1106,7 +1106,7 @@ def main():
             use_barista
             and barista_income_today > 0
             and fi_annual_spend_today > 0
-            and base_swr_30yr > 0
+            and base_30yr_swr > 0
         ):
             (
                 barista_age,
@@ -1123,7 +1123,7 @@ def main():
                 infl_rate=infl_rate,
                 show_real=show_real,
                 annual_rates_by_year_full=annual_rates_by_year_full,
-                base_30yr_swr=base_swr_30yr,
+                base_30yr_swr=base_30yr_swr,
                 barista_end_age=barista_end_age,
                 full_fi_age=retirement_age,
                 tax_rate_bridge=barista_tax_rate_bridge,
@@ -1143,7 +1143,7 @@ def main():
         # --- FI KPI card ---
         if fi_age is not None:
             if effective_swr is None:
-                effective_swr = base_swr_30yr
+                effective_swr = base_30yr_swr
                 horizon_years = (
                     max(max_sim_age - fi_age, 1)
                     if horizon_years is None
@@ -1167,7 +1167,7 @@ def main():
                   <div style="font-size:14px; color:#555555; margin-top:6px;">
                     Effective SWR: {effective_swr*100:.2f}% &bull;
                     Horizon: ~{horizon_years:.0f} years (to age {max_sim_age})<br>
-                    Base 30-year SWR input: {base_swr_30yr*100:.2f}%
+                    Base 30-year SWR input: {base_30yr_swr*100:.2f}%
                   </div>
                 </div>
                 """
@@ -1418,192 +1418,138 @@ def main():
 
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
+        # Put the two line charts side by side and make them smaller
+        col_ret, col_inc = st.columns(2)
+
         # Annual return by age chart (nominal + real), y-axis from 0
-        st.markdown("### Annual return by age")
+        with col_ret:
+            st.markdown("### Annual return by age")
 
-        nominal_pct = [r * 100 for r in annual_rates_by_year_full]
-        if infl_rate > 0:
-            real_pct = [((1 + r) / (1 + infl_rate) - 1) * 100 for r in annual_rates_by_year_full]
-        else:
-            real_pct = nominal_pct.copy()
+            nominal_pct = [r * 100 for r in annual_rates_by_year_full]
+            if infl_rate > 0:
+                real_pct = [
+                    ((1 + r) / (1 + infl_rate) - 1) * 100 for r in annual_rates_by_year_full
+                ]
+            else:
+                real_pct = nominal_pct.copy()
 
-        age_returns_df = pd.DataFrame(
-            {
-                "Age": df_full["Age"],
-                "Nominal": nominal_pct,
-                "Real": real_pct,
-            }
-        )
-
-        y_max_ret = max(max(nominal_pct), max(real_pct))
-        y_max_ret = y_max_ret * 1.1 if y_max_ret > 0 else 1.0
-
-        fig_ret = go.Figure()
-        fig_ret.add_trace(
-            go.Scatter(
-                x=age_returns_df["Age"],
-                y=age_returns_df["Nominal"],
-                mode="lines",
-                name="Nominal return",
+            age_returns_df = pd.DataFrame(
+                {
+                    "Age": df_full["Age"],
+                    "Nominal": nominal_pct,
+                    "Real": real_pct,
+                }
             )
-        )
-        fig_ret.add_trace(
-            go.Scatter(
-                x=age_returns_df["Age"],
-                y=age_returns_df["Real"],
-                mode="lines",
-                name="Real return (net of inflation)",
+
+            y_max_ret = max(max(nominal_pct), max(real_pct))
+            y_max_ret = y_max_ret * 1.1 if y_max_ret > 0 else 1.0
+
+            fig_ret = go.Figure()
+            fig_ret.add_trace(
+                go.Scatter(
+                    x=age_returns_df["Age"],
+                    y=age_returns_df["Nominal"],
+                    mode="lines",
+                    name="Nominal return",
+                )
             )
-        )
+            fig_ret.add_trace(
+                go.Scatter(
+                    x=age_returns_df["Age"],
+                    y=age_returns_df["Real"],
+                    mode="lines",
+                    name="Real return (net of inflation)",
+                )
+            )
 
-        fig_ret.update_layout(
-            title=dict(
-                text="Glide-path annual return by age",
-                x=0.5,
-                xanchor="center",
-                font=dict(size=18),
-            ),
-            xaxis_title="Age (years)",
-            yaxis_title="Annual return (%)",
-            yaxis=dict(range=[0, y_max_ret]),
-            margin=dict(l=40, r=40, t=60, b=40),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5,
-                font=dict(size=12),
-            ),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-        )
+            fig_ret.update_layout(
+                title=dict(
+                    text="Glide-path return",
+                    x=0.5,
+                    xanchor="center",
+                    font=dict(size=16),
+                ),
+                xaxis_title="Age",
+                yaxis_title="Return (%)",
+                yaxis=dict(range=[0, y_max_ret]),
+                margin=dict(l=30, r=20, t=40, b=40),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                    font=dict(size=11),
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                height=300,
+            )
 
-        st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
 
         # Income trajectory chart, y-axis from 0
-        st.markdown("### Income trajectory (after tax)")
+        with col_inc:
+            st.markdown("### Income trajectory")
 
-        fig_inc = go.Figure()
-        fig_inc.add_trace(
-            go.Scatter(
-                x=df_income["Age"],
-                y=df_income["IncomeRealAfterTax"],
-                mode="lines",
-                name="Income (after all taxes)",
+            fig_inc = go.Figure()
+            fig_inc.add_trace(
+                go.Scatter(
+                    x=df_income["Age"],
+                    y=df_income["IncomeRealAfterTax"],
+                    mode="lines",
+                    name="Income (after tax)",
+                )
             )
-        )
-        fig_inc.add_trace(
-            go.Scatter(
-                x=df_income["Age"],
-                y=df_income["ExpensesReal"],
-                mode="lines",
-                name="Expenses",
+            fig_inc.add_trace(
+                go.Scatter(
+                    x=df_income["Age"],
+                    y=df_income["ExpensesReal"],
+                    mode="lines",
+                    name="Expenses",
+                )
             )
-        )
-        fig_inc.add_trace(
-            go.Scatter(
-                x=df_income["Age"],
-                y=df_income["InvestableRealAnnual"],
-                mode="lines",
-                name="Annual investable",
+            fig_inc.add_trace(
+                go.Scatter(
+                    x=df_income["Age"],
+                    y=df_income["InvestableRealAnnual"],
+                    mode="lines",
+                    name="Annual investable",
+                )
             )
-        )
 
-        y_max_inc = max(
-            df_income["IncomeRealAfterTax"].max(),
-            df_income["ExpensesReal"].max(),
-            df_income["InvestableRealAnnual"].max(),
-        )
-        y_max_inc = y_max_inc * 1.1 if y_max_inc > 0 else 1.0
-
-        fig_inc.update_layout(
-            title=dict(
-                text="Income, expenses, and investable cash over time",
-                x=0.5,
-                xanchor="center",
-                font=dict(size=18),
-            ),
-            xaxis_title="Age (years)",
-            yaxis_title="Amount per year ($)",
-            yaxis=dict(range=[0, y_max_inc], tickprefix="$"),
-            margin=dict(l=40, r=40, t=60, b=40),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5,
-                font=dict(size=12),
-            ),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-        )
-
-        st.plotly_chart(fig_inc, use_container_width=True, config={"displayModeBar": False})
-
-        # What-if extra savings
-        st.markdown("### What if you saved more (or less)?")
-
-        extra_per_month = st.number_input(
-            "Extra saved per month ($)",
-            value=100,
-            step=50,
-            min_value=-10000,
-            max_value=100000,
-            key="extra_per_month_center",
-        )
-
-        if extra_per_month != 0:
-            years_extra = years_plot
-            monthly_contrib_by_year_extra = []
-            for y in range(years_extra):
-                age = current_age + y
-
-                if age < retirement_age and y < len(df_income):
-                    base_c_real = df_income.loc[y, "InvestableRealMonthly"]
-                else:
-                    base_c_real = 0.0
-
-                total_c_real = base_c_real + extra_per_month
-
-                # Same nominal/real logic fix as main path
-                if show_real and infl_rate > 0:
-                    c_nominal = total_c_real * ((1 + infl_rate) ** y)
-                else:
-                    c_nominal = total_c_real
-
-                monthly_contrib_by_year_extra.append(c_nominal)
-
-            annual_expenses_extra = annual_expense_by_year_nominal_full[:years_extra]
-            annual_rates_extra = annual_rates_by_year_full[:years_extra]
-
-            df_more = compound_schedule(
-                start_balance=start_balance_effective,
-                years=years_extra,
-                monthly_contrib_by_year=monthly_contrib_by_year_extra,
-                annual_expense_by_year=annual_expenses_extra,
-                annual_rate_by_year=annual_rates_extra,
+            y_max_inc = max(
+                df_income["IncomeRealAfterTax"].max(),
+                df_income["ExpensesReal"].max(),
+                df_income["InvestableRealAnnual"].max(),
             )
-            df_more["HomeEquity"] = home_equity_by_year_full[:years_extra]
-            df_more["NetWorth"] = df_more["Balance"] + df_more["HomeEquity"]
+            y_max_inc = y_max_inc * 1.1 if y_max_inc > 0 else 1.0
 
-            if show_real and infl_rate > 0:
-                df_more["DF_end"] = (1 + infl_rate) ** df_more["Year"]
-                for col in ["Balance", "HomeEquity", "NetWorth"]:
-                    df_more[col] = df_more[col] / df_more["DF_end"]
-
-            ending_more = df_more["NetWorth"].iloc[-1]
-            extra_growth = ending_more - ending_net_worth
-
-            label = f"Net worth at {retirement_age} with {extra_per_month:+,.0f}/month"
-            st.metric(
-                label=label,
-                value=f"${ending_more:,.0f}",
-                delta=f"${extra_growth:,.0f}",
+            fig_inc.update_layout(
+                title=dict(
+                    text="Income vs expenses",
+                    x=0.5,
+                    xanchor="center",
+                    font=dict(size=16),
+                ),
+                xaxis_title="Age",
+                yaxis_title="$/year",
+                yaxis=dict(range=[0, y_max_inc], tickprefix="$"),
+                margin=dict(l=30, r=20, t=40, b=40),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                    font=dict(size=11),
+                ),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                height=300,
             )
-        else:
-            st.caption("Set a non-zero amount to see the impact on ending net worth.")
+
+            st.plotly_chart(fig_inc, use_container_width=True, config={"displayModeBar": False})
 
         # Age-by-age table
         st.markdown("### Age-by-age breakdown")
