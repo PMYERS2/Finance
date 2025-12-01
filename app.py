@@ -89,54 +89,118 @@ def compound_schedule(
 # FI helper functions
 # =========================================================
 def adjusted_swr_for_horizon(horizon_years, base_30yr_swr=0.04):
+    """
+    Retained for completeness, but **no longer used** for the main FI age calculation.
+    """
     horizon_years = max(horizon_years, 1)
     raw = base_30yr_swr * (30.0 / horizon_years) ** 0.5
     return max(0.025, min(0.05, raw))
 
 
 def compute_fi_age_horizon(
-    df,
+    df_dummy,
     fi_annual_spend_today,
     infl_rate,
     show_real,
     base_30yr_swr,
-    horizon_end_age=90,
+    horizon_end_age,
+    current_age=None,
+    retirement_age=None,
+    start_balance_effective=None,
+    monthly_contrib_by_year_full=None,
+    annual_expense_by_year_nominal_full=None,
+    annual_rates_by_year_full=None,
 ):
-    if fi_annual_spend_today <= 0 or base_30yr_swr <= 0:
+    """
+    NEW DEFINITION:
+
+    FI age = earliest age at which you can stop all investing (contributions = 0
+    from that age onward) and still hit the 4% rule target at your chosen
+    retirement age.
+
+    Assumptions:
+      - FI target at retirement age (in today's dollars) is:
+          FI_target = fi_annual_spend_today / base_30yr_swr
+      - From FI age to retirement age:
+          * No further contributions
+          * Portfolio compounds at the glide-path return
+          * No *additional* withdrawals before retirement (you cover expenses
+            from income outside this model).
+
+    This is a "coast-FI to retirement age" definition.
+    """
+
+    # Basic validation
+    if (
+        fi_annual_spend_today <= 0
+        or base_30yr_swr <= 0
+        or current_age is None
+        or retirement_age is None
+        or start_balance_effective is None
+        or monthly_contrib_by_year_full is None
+        or annual_expense_by_year_nominal_full is None
+        or annual_rates_by_year_full is None
+    ):
         return None, None, None, None, None
 
-    fi_age = None
-    fi_portfolio = None
-    fi_required = None
-    eff_swr = None
-    horizon_years = None
+    years_full = len(monthly_contrib_by_year_full)
 
-    for row in df.itertuples():
-        age = row.Age
-        year = row.Year
-        balance = row.Balance
+    # Target in today's dollars at the retirement age, based on 4% rule (or whatever base_30yr_swr is).
+    fi_target_real = fi_annual_spend_today / base_30yr_swr
 
-        if age >= horizon_end_age:
+    best_fi_age = None
+    best_portfolio_at_ret = None
+
+    # Scan possible FI ages
+    for age0 in range(current_age + 1, retirement_age + 1):
+        # Build candidate contribution schedule: same as base until age0-1 (and < retirement),
+        # zero afterward (coast).
+        monthly_contrib_candidate = []
+        for year_idx in range(years_full):
+            age = current_age + year_idx
+            if age < age0 and age < retirement_age:
+                monthly_contrib_candidate.append(monthly_contrib_by_year_full[year_idx])
+            else:
+                monthly_contrib_candidate.append(0.0)
+
+        # Run account simulation
+        df_cand = compound_schedule(
+            start_balance=start_balance_effective,
+            years=years_full,
+            monthly_contrib_by_year=monthly_contrib_candidate,
+            annual_expense_by_year=annual_expense_by_year_nominal_full,
+            annual_rate_by_year=annual_rates_by_year_full,
+        )
+        df_cand["Age"] = current_age + df_cand["Year"]
+
+        # Find balance at retirement age
+        row_ret = df_cand[df_cand["Age"] == retirement_age]
+        if row_ret.empty:
             continue
+        row_ret = row_ret.iloc[0]
+        bal_nominal = row_ret["Balance"]
+        year_ret = row_ret["Year"]
 
-        T = max(horizon_end_age - age, 1)
-        swr = adjusted_swr_for_horizon(T, base_30yr_swr=base_30yr_swr)
-        multiple = 1.0 / swr
-
+        # Convert to today's dollars if needed
         if show_real and infl_rate > 0:
-            required = fi_annual_spend_today * multiple
+            bal_real = bal_nominal / ((1 + infl_rate) ** year_ret)
         else:
-            required = fi_annual_spend_today * ((1 + infl_rate) ** year) * multiple
+            bal_real = bal_nominal
 
-        if balance >= required:
-            fi_age = int(age)
-            fi_portfolio = balance
-            fi_required = required
-            eff_swr = swr
-            horizon_years = T
+        # Check if this FI age is feasible
+        if bal_real >= fi_target_real:
+            best_fi_age = age0
+            best_portfolio_at_ret = bal_real
             break
 
-    return fi_age, fi_portfolio, fi_required, eff_swr, horizon_years
+    if best_fi_age is None:
+        # Not reachable under these assumptions
+        return None, None, fi_target_real, base_30yr_swr, None
+
+    horizon_years = retirement_age - best_fi_age
+    effective_swr = base_30yr_swr  # we are explicitly using the base SWR at retirement
+
+    return best_fi_age, best_portfolio_at_ret, fi_target_real, effective_swr, horizon_years
 
 
 def compute_barista_fi_age_bridge(
@@ -155,6 +219,14 @@ def compute_barista_fi_age_bridge(
 ):
     """
     Bridge-to-FI model at full_fi_age using a fixed SWR (base_30yr_swr).
+
+    Note: FI target is anchored to the 4% rule (or user-input SWR) at the
+    *retirement age*, not horizon-adjusted to age 90. That is:
+
+        FI_target_real = fi_annual_spend_today / base_30yr_swr
+
+    This function then finds the earliest feasible Barista start age that
+    allows part-time work + portfolio withdrawals to reach that target.
     """
     S = fi_annual_spend_today
     B = barista_income_today
@@ -180,6 +252,7 @@ def compute_barista_fi_age_bridge(
 
         balance_real_by_age[age] = bal_real
 
+    # FI target at retirement age in today's dollars
     fi_target_real = S / base_30yr_swr
 
     start_age_candidate = current_age + 1
@@ -790,9 +863,10 @@ def main():
     )
 
     st.sidebar.caption(
-        "FI age is computed using your portfolio path from now to age 90. "
-        "The traditional FI age slider only controls when contributions stop "
-        "and how far the main chart extends (before applying net-worth override below)."
+        "FI age is computed as the earliest age where you can stop investing and still "
+        "reach your FI target at the traditional FI age slider using your SWR input. "
+        "The traditional FI age slider controls when you stop all work and when the main "
+        "chart stops, before applying the net-worth override below."
     )
 
     use_barista = st.sidebar.checkbox(
@@ -870,7 +944,7 @@ def main():
         age = current_age + y
         annual_rates_by_year_full.append(glide_path_return(age, annual_rate_base))
 
-    # Full-path contributions (used for FI math)
+    # Contributions (nominal in simulation)
     monthly_contrib_by_year_full = []
     for y in range(years_full):
         age = current_age + y
@@ -1023,7 +1097,7 @@ def main():
     for y in range(years_full):
         annual_expense_by_year_nominal_full[y] += housing_adj_by_year_full[y]
 
-    # Base full-path simulation (used for FI / Barista calculations)
+    # Base full-path simulation (used mostly for Barista math, not FI age any more)
     df_full = compound_schedule(
         start_balance=start_balance_effective,
         years=years_full,
@@ -1041,6 +1115,7 @@ def main():
 
     if show_real and infl_rate > 0:
         df_full["DF_end"] = (1 + infl_rate) ** df_full["Year"]
+        df_full["DF_mid"] = (1 + infl_rate) ** (df_full["Year"] - 1)
 
         for col in [
             "Balance",
@@ -1072,35 +1147,34 @@ def main():
             df_full.loc[idx, "NetContributions"] = net_contrib_cum_real
     else:
         df_full["DF_end"] = 1.0
+        df_full["DF_mid"] = 1.0
 
     label_suffix = " (today's dollars)" if show_real and infl_rate > 0 else " (nominal)"
 
-    # ---- Compute FI + Barista metrics on base path (df_full) ----
-    fi_age, fi_portfolio_base, fi_required, effective_swr, horizon_years = compute_fi_age_horizon(
-        df_full,
-        fi_annual_spend_today,
-        infl_rate,
-        show_real,
-        base_swr_30yr,
-        horizon_end_age=max_sim_age,
-    )
+    main_left, fi_col = st.columns([4, 2])
 
-    (
-        barista_age,
-        barista_start_balance_real,
-        barista_fi_balance_real,
-        barista_fi_target_real,
-        barista_bridge_years,
-        barista_pv_bridge_need_real,
-    ) = (None, None, None, None, None, None)
-    taxable_ratio_rec = None
+    # Right column: FI + Barista bridge KPI cards
+    with fi_col:
+        st.markdown("### FI and Part-Time Work summary")
 
-    if (
-        use_barista
-        and barista_income_today > 0
-        and fi_annual_spend_today > 0
-        and base_swr_30yr > 0
-    ):
+        # --- Compute FI metrics using new 'coast to retirement' rule ---
+        fi_age, fi_portfolio, fi_required, effective_swr, horizon_years = (
+            compute_fi_age_horizon(
+                df_full,
+                fi_annual_spend_today,
+                infl_rate,
+                show_real,
+                base_swr_30yr,
+                horizon_end_age=max_sim_age,  # unused in new logic
+                current_age=current_age,
+                retirement_age=retirement_age,
+                start_balance_effective=start_balance_effective,
+                monthly_contrib_by_year_full=monthly_contrib_by_year_full,
+                annual_expense_by_year_nominal_full=annual_expense_by_year_nominal_full,
+                annual_rates_by_year_full=annual_rates_by_year_full,
+            )
+        )
+
         (
             barista_age,
             barista_start_balance_real,
@@ -1108,35 +1182,156 @@ def main():
             barista_fi_target_real,
             barista_bridge_years,
             barista_pv_bridge_need_real,
-        ) = compute_barista_fi_age_bridge(
-            df_full,
-            current_age=current_age,
-            fi_annual_spend_today=fi_annual_spend_today,
-            barista_income_today=barista_income_today,
-            infl_rate=infl_rate,
-            show_real=show_real,
-            annual_rates_by_year_full=annual_rates_by_year_full,
-            base_30yr_swr=base_swr_30yr,
-            barista_end_age=barista_end_age,
-            full_fi_age=retirement_age,
-            tax_rate_bridge=barista_tax_rate_bridge,
-            extra_health_today=extra_health_today,
-        )
+        ) = (None, None, None, None, None, None)
+        taxable_ratio_rec = None
 
         if (
-            barista_age is not None
-            and barista_start_balance_real is not None
-            and barista_start_balance_real > 0
-            and barista_pv_bridge_need_real is not None
+            use_barista
+            and barista_income_today > 0
+            and fi_annual_spend_today > 0
+            and base_swr_30yr > 0
         ):
-            taxable_ratio_rec = min(
-                1.0, barista_pv_bridge_need_real / barista_start_balance_real
+            (
+                barista_age,
+                barista_start_balance_real,
+                barista_fi_balance_real,
+                barista_fi_target_real,
+                barista_bridge_years,
+                barista_pv_bridge_need_real,
+            ) = compute_barista_fi_age_bridge(
+                df_full,
+                current_age=current_age,
+                fi_annual_spend_today=fi_annual_spend_today,
+                barista_income_today=barista_income_today,
+                infl_rate=infl_rate,
+                show_real=show_real,
+                annual_rates_by_year_full=annual_rates_by_year_full,
+                base_30yr_swr=base_swr_30yr,
+                barista_end_age=barista_end_age,
+                full_fi_age=retirement_age,
+                tax_rate_bridge=barista_tax_rate_bridge,
+                extra_health_today=extra_health_today,
             )
 
-    # ---- Layout columns (we'll fill fi_col after chart path is built) ----
-    main_left, fi_col = st.columns([4, 2])
+            if (
+                barista_age is not None
+                and barista_start_balance_real is not None
+                and barista_start_balance_real > 0
+                and barista_pv_bridge_need_real is not None
+            ):
+                taxable_ratio_rec = min(
+                    1.0, barista_pv_bridge_need_real / barista_start_balance_real
+                )
 
-    # Barista income series on base path (for info; not used in chart sim)
+        # --- FI KPI card ---
+        if fi_age is not None:
+            fi_card_html = textwrap.dedent(
+                f"""
+                <div style="background-color:#E5E5E5; padding:30px 20px; border-radius:12px;
+                            text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
+                  <div style="font-size:20px; color:#333333; margin-bottom:4px;">
+                    Financial independence age
+                  </div>
+                  <div style="font-size:72px; font-weight:700; color:#000000; line-height:1.05;">
+                    {fi_age}
+                  </div>
+                  <div style="font-size:16px; color:#444444; margin-top:14px;">
+                    FI target at age {retirement_age}: ${fi_required:,.0f} &bull;
+                    Portfolio at FI (coast path): ${fi_portfolio:,.0f}
+                  </div>
+                  <div style="font-size:14px; color:#555555; margin-top:6px;">
+                    SWR at retirement: {effective_swr*100:.2f}% &bull;
+                    Horizon: ~{horizon_years:.0f} years (FI age {fi_age} → {retirement_age})<br>
+                    Base SWR input: {base_swr_30yr*100:.2f}%
+                  </div>
+                </div>
+                """
+            )
+            st.markdown(fi_card_html, unsafe_allow_html=True)
+        else:
+            fi_card_html = textwrap.dedent(
+                """
+                <div style="background-color:#E5E5E5; padding:24px 20px; border-radius:12px;
+                            text-align:center; margin-bottom:16px; border:1px solid #CFCFCF;">
+                  <div style="font-size:18px; color:#333333; margin-bottom:6px;">
+                    Financial independence age
+                  </div>
+                  <div style="font-size:32px; font-weight:600; color:#CC0000;">
+                    Not reached (under current assumptions)
+                  </div>
+                </div>
+                """
+            )
+            st.markdown(fi_card_html, unsafe_allow_html=True)
+
+        # --- Part-time work FI independence KPI card ---
+        if use_barista:
+            if barista_age is not None:
+                summary_line = (
+                    f"Part-time from age {barista_age} to {barista_end_age} "
+                    f"(~{barista_bridge_years:.0f} years) before full FI at age {retirement_age}."
+                )
+
+                target_line = (
+                    f"FI target at age {retirement_age}: ${barista_fi_target_real:,.0f} &bull; "
+                    f"Projected portfolio at FI (bridge path): ${barista_fi_balance_real:,.0f}"
+                )
+
+                taxable_line = ""
+                if taxable_ratio_rec is not None and barista_pv_bridge_need_real is not None:
+                    taxable_line = (
+                        f"Bridge withdrawals present value: ${barista_pv_bridge_need_real:,.0f} "
+                        f"(~{taxable_ratio_rec*100:.0f}% of portfolio at Part-Time age)."
+                    )
+
+                barista_card_html = textwrap.dedent(
+                    f"""
+                    <div style="background-color:#F0EFEF; padding:26px 20px; border-radius:12px;
+                                text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
+                      <div style="font-size:20px; color:#333333; margin-bottom:4px;">
+                        Part Time Work FI Independence Age
+                      </div>
+                      <div style="font-size:64px; font-weight:700; color:#000000; line-height:1.05;">
+                        {barista_age}
+                      </div>
+                      <div style="font-size:15px; color:#444444; margin-top:12px;">
+                        {summary_line}
+                      </div>
+                      <div style="font-size:14px; color:#555555; margin-top:6px;">
+                        Part-time income: ${barista_income_today:,.0f}/yr &bull;
+                        Extra health costs: ${extra_health_today:,.0f}/yr &bull;
+                        Withdrawal tax: {barista_tax_rate_bridge*100:.0f}%
+                      </div>
+                      <div style="font-size:14px; color:#555555; margin-top:6px;">
+                        {target_line}
+                      </div>
+                      {f'<div style="font-size:13px; color:#666666; margin-top:6px;">{taxable_line}</div>' if taxable_line else ''}
+                    </div>
+                    """
+                )
+                st.markdown(barista_card_html, unsafe_allow_html=True)
+            else:
+                barista_card_html = textwrap.dedent(
+                    f"""
+                    <div style="background-color:#F0EFEF; padding:24px 20px; border-radius:12px;
+                                text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
+                      <div style="font-size:20px; color:#333333; margin-bottom:6px;">
+                        Part Time Work FI Independence Age
+                      </div>
+                      <div style="font-size:28px; font-weight:600; color:#CC0000;">
+                        Not feasible
+                      </div>
+                      <div style="font-size:13px; color:#555555; margin-top:8px;">
+                        With ${barista_income_today:,.0f}/yr part-time income, extra health costs of
+                        ${extra_health_today:,.0f}/yr, and a {barista_tax_rate_bridge*100:.0f}% tax
+                        rate on withdrawals, the model cannot reach the FI target by age {retirement_age}.
+                      </div>
+                    </div>
+                    """
+                )
+                st.markdown(barista_card_html, unsafe_allow_html=True)
+
+    # Barista income series (on base path) – still for display only
     barista_income_series = []
     for row in df_full.itertuples():
         age = row.Age
@@ -1197,56 +1392,12 @@ def main():
         else:
             monthly_contrib_by_year_chart.append(0.0)
 
-    # Build expenses schedule for chart path:
-    # start from base expenses, then overlay FI/Barista withdrawals.
-    annual_expense_by_year_chart = annual_expense_by_year_nominal_full.copy()
-
-    for year_idx in range(years_full):
-        age_end = current_age + year_idx + 1
-
-        extra_spend_real = 0.0
-
-        # If stop at FI age: from FI age to retirement slider, withdraw full FI spend
-        if (
-            stop_choice == "FI independence age"
-            and fi_age is not None
-            and fi_annual_spend_today > 0
-            and age_end >= fi_age
-            and age_end <= retirement_age
-        ):
-            extra_spend_real = fi_annual_spend_today
-
-        # If stop at Barista age: from Barista age to retirement slider, withdraw net spend
-        elif (
-            stop_choice == "Part Time Work FI Independence Age"
-            and use_barista
-            and barista_age is not None
-            and fi_annual_spend_today > 0
-            and age_end >= barista_age
-            and age_end <= retirement_age
-        ):
-            if age_end <= barista_end_age:
-                # During part-time years: FI spend minus PT income + extra health
-                extra_spend_real = max(fi_annual_spend_today - barista_income_today, 0.0) + max(
-                    extra_health_today, 0.0
-                )
-            else:
-                # After part-time but before full FI age slider: full FI spend
-                extra_spend_real = fi_annual_spend_today
-
-        if extra_spend_real > 0:
-            if show_real and infl_rate > 0:
-                extra_spend_nominal = extra_spend_real * ((1 + infl_rate) ** (year_idx + 1))
-            else:
-                extra_spend_nominal = extra_spend_real
-            annual_expense_by_year_chart[year_idx] += extra_spend_nominal
-
-    # Re-run compound schedule for chart path using modified contrib/expense
+    # Re-run compound schedule for chart path using modified contributions
     df_full_chart = compound_schedule(
         start_balance=start_balance_effective,
         years=years_full,
         monthly_contrib_by_year=monthly_contrib_by_year_chart,
-        annual_expense_by_year=annual_expense_by_year_chart,
+        annual_expense_by_year=annual_expense_by_year_nominal_full,
         annual_rate_by_year=annual_rates_by_year_full,
     )
 
@@ -1263,6 +1414,17 @@ def main():
     # Inflation adjustment for chart path
     if show_real and infl_rate > 0:
         df_full_chart["DF_end"] = (1 + infl_rate) ** df_full_chart["Year"]
+        df_full_chart["DF_mid"] = (1 + infl_rate) ** (df_full_chart["Year"] - 1)
+
+        for col in [
+            "Balance",
+            "InvestGrowth",
+            "InvestGrowthYear",
+            "HomePrice",
+            "HomeEquity",
+            "NetWorth",
+        ]:
+            df_full_chart[col] = df_full_chart[col] / df_full_chart["DF_end"]
 
         cum_contrib_real = 0.0
         cum_expense_drag_real = 0.0
@@ -1270,18 +1432,6 @@ def main():
         net_contrib_cum_real = 0.0
 
         for idx in range(len(df_full_chart)):
-            df_factor_end = df_full_chart.loc[idx, "DF_end"]
-
-            for col in [
-                "Balance",
-                "InvestGrowth",
-                "InvestGrowthYear",
-                "HomePrice",
-                "HomeEquity",
-                "NetWorth",
-            ]:
-                df_full_chart.loc[idx, col] = df_full_chart.loc[idx, col] / df_factor_end
-
             c = df_full_chart.loc[idx, "ContribYear"]
             e = df_full_chart.loc[idx, "AnnualExpense"]
 
@@ -1296,155 +1446,13 @@ def main():
             df_full_chart.loc[idx, "NetContributions"] = net_contrib_cum_real
     else:
         df_full_chart["DF_end"] = 1.0
+        df_full_chart["DF_mid"] = 1.0
 
-    # Use chart path for visualizations/tables (clipped at traditional FI age)
+    # Use chart path for all visualizations/tables (still clipped at traditional FI age)
     df_plot = df_full_chart[df_full_chart["Age"] <= retirement_age].reset_index(drop=True)
 
     ending_net_worth = df_plot["NetWorth"].iloc[-1]
     ending_invest_balance = df_plot["Balance"].iloc[-1]
-
-    # ---- FI / Barista portfolio values on CHART path ----
-    fi_portfolio_chart = None
-    if fi_age is not None:
-        match_fi = df_full_chart.loc[df_full_chart["Age"] == fi_age]
-        if not match_fi.empty:
-            fi_portfolio_chart = match_fi["Balance"].iloc[0]
-
-    fi_portfolio_display = fi_portfolio_chart if fi_portfolio_chart is not None else fi_portfolio_base
-
-    barista_fi_balance_chart = None
-    if use_barista and barista_age is not None:
-        match_bar_fi = df_full_chart.loc[df_full_chart["Age"] == retirement_age]
-        if not match_bar_fi.empty:
-            barista_fi_balance_chart = match_bar_fi["Balance"].iloc[0]
-
-    # Right column: FI + Barista KPIs using chart-path portfolios
-    with fi_col:
-        st.markdown("### FI and Part-Time Work summary")
-
-        # --- FI KPI card ---
-        if fi_age is not None and fi_portfolio_display is not None and fi_required is not None:
-            if effective_swr is None:
-                effective_swr = base_swr_30yr
-                horizon_years = (
-                    max(max_sim_age - fi_age, 1)
-                    if horizon_years is None
-                    else horizon_years
-                )
-
-            fi_card_html = textwrap.dedent(
-                f"""
-                <div style="background-color:#E5E5E5; padding:30px 20px; border-radius:12px;
-                            text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
-                  <div style="font-size:20px; color:#333333; margin-bottom:4px;">
-                    Financial independence age
-                  </div>
-                  <div style="font-size:72px; font-weight:700; color:#000000; line-height:1.05;">
-                    {fi_age}
-                  </div>
-                  <div style="font-size:16px; color:#444444; margin-top:14px;">
-                    FI target: ${fi_required:,.0f} &bull;
-                    Portfolio at FI (chart path): ${fi_portfolio_display:,.0f}
-                  </div>
-                  <div style="font-size:14px; color:#555555; margin-top:6px;">
-                    Effective SWR: {effective_swr*100:.2f}% &bull;
-                    Horizon: ~{horizon_years:.0f} years (to age {max_sim_age})<br>
-                    Base 30-year SWR input: {base_swr_30yr*100:.2f}%
-                  </div>
-                </div>
-                """
-            )
-            st.markdown(fi_card_html, unsafe_allow_html=True)
-        else:
-            fi_card_html = textwrap.dedent(
-                """
-                <div style="background-color:#E5E5E5; padding:24px 20px; border-radius:12px;
-                            text-align:center; margin-bottom:16px; border:1px solid #CFCFCF;">
-                  <div style="font-size:18px; color:#333333; margin-bottom:6px;">
-                    Financial independence age
-                  </div>
-                  <div style="font-size:32px; font-weight:600; color:#CC0000;">
-                    Not reached
-                  </div>
-                </div>
-                """
-            )
-            st.markdown(fi_card_html, unsafe_allow_html=True)
-            st.caption(
-                "Under the horizon-aware withdrawal rate, FI is not reached by age 90 "
-                "with the current assumptions."
-            )
-
-        # --- Part-time work FI independence KPI card ---
-        if use_barista:
-            if barista_age is not None:
-                summary_line = (
-                    f"Part-time from age {barista_age} to {barista_end_age} "
-                    f"(~{barista_bridge_years:.0f} years) before full FI at age {retirement_age}."
-                    if barista_bridge_years is not None
-                    else f"Part-time starting at age {barista_age} before full FI at age {retirement_age}."
-                )
-
-                target_line = ""
-                if barista_fi_target_real is not None and barista_fi_balance_chart is not None:
-                    target_line = (
-                        f"FI target: ${barista_fi_target_real:,.0f} &bull; "
-                        f"Projected portfolio at FI (chart path): ${barista_fi_balance_chart:,.0f}"
-                    )
-
-                taxable_line = ""
-                if taxable_ratio_rec is not None and barista_pv_bridge_need_real is not None:
-                    taxable_line = (
-                        f"Bridge withdrawals present value: ${barista_pv_bridge_need_real:,.0f} "
-                        f"(~{taxable_ratio_rec*100:.0f}% of portfolio at Part-Time age)."
-                    )
-
-                barista_card_html = textwrap.dedent(
-                    f"""
-                    <div style="background-color:#F0EFEF; padding:26px 20px; border-radius:12px;
-                                text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
-                      <div style="font-size:20px; color:#333333; margin-bottom:4px;">
-                        Part Time Work FI Independence Age
-                      </div>
-                      <div style="font-size:64px; font-weight:700; color:#000000; line-height:1.05;">
-                        {barista_age}
-                      </div>
-                      <div style="font-size:15px; color:#444444; margin-top:12px;">
-                        {summary_line}
-                      </div>
-                      <div style="font-size:14px; color:#555555; margin-top:6px;">
-                        Part-time income: ${barista_income_today:,.0f}/yr &bull;
-                        Extra health costs: ${extra_health_today:,.0f}/yr &bull;
-                        Withdrawal tax: {barista_tax_rate_bridge*100:.0f}%
-                      </div>
-                      <div style="font-size:14px; color:#555555; margin-top:6px;">
-                        {target_line}
-                      </div>
-                      {f'<div style="font-size:13px; color:#666666; margin-top:6px;">{taxable_line}</div>' if taxable_line else ''}
-                    </div>
-                    """
-                )
-                st.markdown(barista_card_html, unsafe_allow_html=True)
-            else:
-                barista_card_html = textwrap.dedent(
-                    f"""
-                    <div style="background-color:#F0EFEF; padding:24px 20px; border-radius:12px;
-                                text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
-                      <div style="font-size:20px; color:#333333; margin-bottom:6px;">
-                        Part Time Work FI Independence Age
-                      </div>
-                      <div style="font-size:28px; font-weight:600; color:#CC0000;">
-                        Not feasible
-                      </div>
-                      <div style="font-size:13px; color:#555555; margin-top:8px;">
-                        With ${barista_income_today:,.0f}/yr part-time income, extra health costs of
-                        ${extra_health_today:,.0f}/yr, and a {barista_tax_rate_bridge*100:.0f}% tax
-                        rate on withdrawals, the model cannot reach the FI target by age {retirement_age}.
-                      </div>
-                    </div>
-                    """
-                )
-                st.markdown(barista_card_html, unsafe_allow_html=True)
 
     # Left column: charts + tables
     with main_left:
@@ -1453,7 +1461,7 @@ def main():
         )
         st.caption(
             f"(Investments: ${ending_invest_balance:,.0f}; home equity included in net worth. "
-            f"Assumes full-time work stops at age {stop_work_age_for_chart}, with FI/Barista withdrawals applied.)"
+            f"Assumes full-time work stops at age {stop_work_age_for_chart}.)"
         )
 
         # Net worth decomposition chart
@@ -1728,80 +1736,6 @@ def main():
             use_container_width=True,
         )
 
-        # -------- Model check table (FI vs Barista) --------
-        vet_rows = []
-
-        if fi_age is not None and fi_portfolio_display is not None and fi_required is not None:
-            vet_rows.append(
-                {
-                    "Scenario": "FI independence",
-                    "Age": fi_age,
-                    "Portfolio at Age (chart path)": fi_portfolio_display,
-                    "Required portfolio": fi_required,
-                    "Effective SWR": effective_swr if effective_swr is not None else base_swr_30yr,
-                    "Years horizon": horizon_years if horizon_years is not None else max_sim_age - fi_age,
-                    "Part-time income": None,
-                    "Bridge years": None,
-                    "PV bridge need": None,
-                    "Chart stop age (this run)": stop_work_age_for_chart,
-                }
-            )
-
-        if (
-            use_barista
-            and barista_age is not None
-            and barista_start_balance_real is not None
-            and barista_fi_target_real is not None
-        ):
-            vet_rows.append(
-                {
-                    "Scenario": "Part-Time start",
-                    "Age": barista_age,
-                    "Portfolio at Age (chart path)": barista_start_balance_real,
-                    "Required portfolio": barista_fi_target_real,
-                    "Effective SWR": base_swr_30yr,
-                    "Years horizon": barista_bridge_years,
-                    "Part-time income": barista_income_today,
-                    "Bridge years": barista_bridge_years,
-                    "PV bridge need": barista_pv_bridge_need_real,
-                    "Chart stop age (this run)": stop_work_age_for_chart,
-                }
-            )
-
-            if barista_fi_balance_chart is not None:
-                vet_rows.append(
-                    {
-                        "Scenario": "Full FI (after Part-Time)",
-                        "Age": retirement_age,
-                        "Portfolio at Age (chart path)": barista_fi_balance_chart,
-                        "Required portfolio": barista_fi_target_real,
-                        "Effective SWR": base_swr_30yr,
-                        "Years horizon": horizon_years if horizon_years is not None else max_sim_age - retirement_age,
-                        "Part-time income": barista_income_today,
-                        "Bridge years": barista_bridge_years,
-                        "PV bridge need": barista_pv_bridge_need_real,
-                        "Chart stop age (this run)": stop_work_age_for_chart,
-                    }
-                )
-
-        if vet_rows:
-            st.markdown("### Model check table")
-            vet_df = pd.DataFrame(vet_rows)
-            st.dataframe(
-                vet_df.style.format(
-                    {
-                        "Portfolio at Age (chart path)": "${:,.0f}",
-                        "Required portfolio": "${:,.0f}",
-                        "Part-time income": "${:,.0f}",
-                        "PV bridge need": "${:,.0f}",
-                        "Effective SWR": "{:.3f}",
-                    },
-                    na_rep="—",
-                ),
-                hide_index=True,
-                use_container_width=True,
-            )
-
         # -------- Key assumptions & notes --------
         assumptions = []
 
@@ -1859,19 +1793,19 @@ def main():
             "gradually de-risking as you approach and pass traditional FI age."
         )
         assumptions.append(
-            "- Financial independence age is calculated from the full base path to age 90; "
-            "home equity is excluded from FI calculations."
+            "- FI age is the earliest age you can stop investing and still reach the 4% rule "
+            f"target at age {retirement_age}. Home equity is excluded from FI calculations."
         )
         assumptions.append(
-            f"- Net worth chart uses the same contribution stop age ({stop_work_age_for_chart}) and "
-            "applies FI/Barista withdrawals directly to the portfolio path shown."
+            f"- Net worth chart contributions stop at age {stop_work_age_for_chart}; "
+            "FI math itself uses the coast-to-retirement assumption."
         )
 
-        if use_barista and barista_age is not None and barista_pv_bridge_need_real is not None:
+        if use_barista and barista_age is not None:
             assumptions.append(
-                f"- Part-time bridge: portfolio withdrawals during the bridge have present value "
-                f"~${barista_pv_bridge_need_real:,.0f}, about {taxable_ratio_rec*100:.0f}% "
-                f"of the portfolio at the Part-Time start age."
+                f"- Part-time bridge: Barista FI math models withdrawals needed to cover the gap between "
+                f"spending and part-time income from age {barista_age} to {retirement_age}, including extra health "
+                f"costs and the specified withdrawal tax rate."
             )
 
         if assumptions:
