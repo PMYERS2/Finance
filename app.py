@@ -1362,7 +1362,7 @@ def main():
 
         fig.update_layout(
             barmode="stack",
-            height=350,
+            height=300,
             title=dict(
                 text="Net worth over time",
                 x=0.5,
@@ -1663,6 +1663,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
