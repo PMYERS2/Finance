@@ -1526,12 +1526,7 @@ def main():
             y_max_inc = y_max_inc * 1.1 if y_max_inc > 0 else 1.0
 
             fig_inc.update_layout(
-                title=dict(
-                    text="Income vs expenses",
-                    x=0.5,
-                    xanchor="center",
-                    font=dict(size=16),
-                ),
+             
                 xaxis_title="Age",
                 yaxis_title="$/year",
                 yaxis=dict(range=[0, y_max_inc], tickprefix="$"),
@@ -1667,4 +1662,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
