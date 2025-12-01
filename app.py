@@ -1362,8 +1362,9 @@ def main():
 
         fig.update_layout(
             barmode="stack",
+            height=350,
             title=dict(
-                text="Decomposition of net worth over time",
+                text="Net worth over time",
                 x=0.5,
                 xanchor="center",
                 font=dict(size=18),
@@ -1662,6 +1663,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
