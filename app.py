@@ -765,7 +765,7 @@ def main():
     else:
         car_cost_today = first_car_age = car_interval_years = None
 
-    # FI / Barista FIRE settings moved to sidebar
+    # FI / Barista FIRE settings
     st.sidebar.markdown("---")
     st.sidebar.subheader("FI / Barista FIRE settings")
 
@@ -792,7 +792,7 @@ def main():
     st.sidebar.caption(
         "FI age is computed using your portfolio path from now to age 90. "
         "The traditional FI age slider only controls when contributions stop "
-        "and how far the main chart extends."
+        "and how far the main chart extends (before applying net-worth override below)."
     )
 
     use_barista = st.sidebar.checkbox(
@@ -1023,6 +1023,7 @@ def main():
     for y in range(years_full):
         annual_expense_by_year_nominal_full[y] += housing_adj_by_year_full[y]
 
+    # Base full-path simulation (used for FI / Barista calculations)
     df_full = compound_schedule(
         start_balance=start_balance_effective,
         years=years_full,
@@ -1082,7 +1083,7 @@ def main():
     with fi_col:
         st.markdown("### FI and Barista FIRE summary")
 
-        # --- Compute FI and Barista FI metrics ---
+        # --- Compute FI metrics on base path ---
         fi_age, fi_portfolio, fi_required, effective_swr, horizon_years = (
             compute_fi_age_horizon(
                 df_full,
@@ -1262,7 +1263,7 @@ def main():
                 )
                 st.markdown(barista_card_html, unsafe_allow_html=True)
 
-    # Barista income series
+    # Barista income series (on base path)
     barista_income_series = []
     for row in df_full.itertuples():
         age = row.Age
@@ -1284,16 +1285,116 @@ def main():
 
     df_full["BaristaIncome"] = barista_income_series
 
-    df_plot = df_full[df_full["Age"] <= retirement_age].reset_index(drop=True)
+    # ---------------------------------------------------------
+    # Net worth chart override: choose when you stop working
+    # ---------------------------------------------------------
+    with main_left:
+        stop_options = []
+        stop_ages = []
+
+        # Always allow traditional FI age slider
+        stop_options.append("Traditional FI age slider")
+        stop_ages.append(retirement_age)
+
+        # If FI age is known, allow it
+        if fi_age is not None:
+            stop_options.append("FI independence age")
+            stop_ages.append(fi_age)
+
+        # If Barista age is known, allow it
+        if use_barista and barista_age is not None:
+            stop_options.append("Part Time Work FI Independence Age")
+            stop_ages.append(barista_age)
+
+        stop_choice = st.selectbox(
+            "Net worth chart assumes you stop full-time work at:",
+            options=stop_options,
+            index=0,
+        )
+
+    # Map selection to stop-work age
+    stop_work_age_for_chart = stop_ages[stop_options.index(stop_choice)]
+
+    # Build contributions schedule for chart path:
+    # same as base contributions, but zero after chosen stop-work age.
+    monthly_contrib_by_year_chart = []
+    for y in range(years_full):
+        age = current_age + y
+        if age < stop_work_age_for_chart:
+            monthly_contrib_by_year_chart.append(monthly_contrib_by_year_full[y])
+        else:
+            monthly_contrib_by_year_chart.append(0.0)
+
+    # Re-run compound schedule for chart path using modified contributions
+    df_full_chart = compound_schedule(
+        start_balance=start_balance_effective,
+        years=years_full,
+        monthly_contrib_by_year=monthly_contrib_by_year_chart,
+        annual_expense_by_year=annual_expense_by_year_nominal_full,
+        annual_rate_by_year=annual_rates_by_year_full,
+    )
+
+    # Attach age, home, net worth, etc. to chart path
+    df_full_chart["Age"] = current_age + df_full_chart["Year"]
+    df_full_chart["HomePrice"] = home_price_by_year_full
+    df_full_chart["HomeEquity"] = home_equity_by_year_full
+    df_full_chart["NetWorth"] = df_full_chart["Balance"] + df_full_chart["HomeEquity"]
+    df_full_chart["HousingDelta"] = housing_adj_by_year_full
+    df_full_chart["NetContributions"] = (
+        df_full_chart["CumContributions"] + df_full_chart["ExpenseDrag"]
+    )
+
+    # Inflation adjustment for chart path
+    if show_real and infl_rate > 0:
+        df_full_chart["DF_end"] = (1 + infl_rate) ** df_full_chart["Year"]
+        df_full_chart["DF_mid"] = (1 + infl_rate) ** (df_full_chart["Year"] - 1)
+
+        for col in [
+            "Balance",
+            "InvestGrowth",
+            "InvestGrowthYear",
+            "HomePrice",
+            "HomeEquity",
+            "NetWorth",
+        ]:
+            df_full_chart[col] = df_full_chart[col] / df_full_chart["DF_end"]
+
+        cum_contrib_real = 0.0
+        cum_expense_drag_real = 0.0
+        cum_expense_abs_real = 0.0
+        net_contrib_cum_real = 0.0
+
+        for idx in range(len(df_full_chart)):
+            c = df_full_chart.loc[idx, "ContribYear"]
+            e = df_full_chart.loc[idx, "AnnualExpense"]
+
+            cum_contrib_real += c
+            cum_expense_drag_real += -e
+            cum_expense_abs_real += e
+            net_contrib_cum_real = cum_contrib_real + cum_expense_drag_real
+
+            df_full_chart.loc[idx, "CumContributions"] = cum_contrib_real
+            df_full_chart.loc[idx, "ExpenseDrag"] = cum_expense_drag_real
+            df_full_chart.loc[idx, "CumulativeExpense"] = cum_expense_abs_real
+            df_full_chart.loc[idx, "NetContributions"] = net_contrib_cum_real
+    else:
+        df_full_chart["DF_end"] = 1.0
+        df_full_chart["DF_mid"] = 1.0
+
+    # Use chart path for all visualizations/tables (still clipped at traditional FI age)
+    df_plot = df_full_chart[df_full_chart["Age"] <= retirement_age].reset_index(drop=True)
 
     ending_net_worth = df_plot["NetWorth"].iloc[-1]
     ending_invest_balance = df_plot["Balance"].iloc[-1]
 
     # Left column: charts + tables
     with main_left:
-        st.subheader(f"Net worth at traditional FI age: ${ending_net_worth:,.0f}{label_suffix}")
+        st.subheader(
+            f"Net worth at traditional FI age: ${ending_net_worth:,.0f}{label_suffix}"
+        )
         st.caption(
-            f"(Investments: ${ending_invest_balance:,.0f}; home equity included in net worth.)"
+            f"(Investments: ${ending_invest_balance:,.0f}; home equity included in net worth. "
+            f"Assumes full-time work stops at age {stop_work_age_for_chart}.)"
         )
 
         # Net worth decomposition chart
@@ -1433,7 +1534,7 @@ def main():
 
             age_returns_df = pd.DataFrame(
                 {
-                    "Age": df_full["Age"],
+                    "Age": df_full_chart["Age"],
                     "Nominal": nominal_pct,
                 }
             )
@@ -1528,7 +1629,7 @@ def main():
 
             st.plotly_chart(fig_inc, use_container_width=True, config={"displayModeBar": False})
 
-        # Age-by-age table
+        # Age-by-age table (chart path)
         st.markdown("### Age-by-age breakdown")
 
         display_df = df_plot.copy()
@@ -1568,7 +1669,7 @@ def main():
             use_container_width=True,
         )
 
-        # -------- Key assumptions moved to bottom --------
+        # -------- Key assumptions & notes --------
         assumptions = []
 
         if len(df_income) > 0:
@@ -1628,10 +1729,14 @@ def main():
             "- Financial independence age is calculated from the full path to age 90; "
             "home equity is excluded from FI calculations."
         )
+        assumptions.append(
+            f"- Net worth chart contributions stop at age {stop_work_age_for_chart}; "
+            "FI math itself still uses the full base path to age 90."
+        )
 
         if use_barista and "barista_age" in locals() and barista_age is not None:
             assumptions.append(
-                f"- Part-time bridge: contributions stop at age {barista_age}. "
+                f"- Part-time bridge: contributions stop at age {barista_age} in the FI bridge logic. "
                 f"Part-time income `${barista_income_today:,.0f}`/yr, extra health `${extra_health_today:,.0f}`/yr, "
                 f"{barista_tax_rate_bridge*100:.0f}% withdrawal tax, and an approximate taxable-need "
                 f"of ${barista_pv_bridge_need_real:,.0f} for the bridge period."
