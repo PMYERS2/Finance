@@ -848,7 +848,7 @@ def main():
             key="barista_end_age",
         )
 
-    # Income schedule (after all taxes)
+    # Income schedule
     df_income = build_income_schedule(
         current_age=current_age,
         retirement_age=retirement_age,
@@ -870,17 +870,15 @@ def main():
         age = current_age + y
         annual_rates_by_year_full.append(glide_path_return(age, annual_rate_base))
 
-    # ---- FIXED LOGIC: contributions always nominal in simulation ----
+    # Contributions (nominal in simulation)
     monthly_contrib_by_year_full = []
     for y in range(years_full):
         age = current_age + y
         if age < retirement_age and y < len(df_income):
             contrib_month_real = df_income.loc[y, "InvestableRealMonthly"]
             if show_real and infl_rate > 0:
-                # df_income is real → convert to nominal for simulation
                 val = contrib_month_real * ((1 + infl_rate) ** y)
             else:
-                # df_income already nominal
                 val = contrib_month_real
         else:
             val = 0.0
@@ -1197,7 +1195,7 @@ def main():
                 "with the current assumptions."
             )
 
-        # --- Separate Barista FIRE KPI card ---
+        # --- Part-time work FI independence KPI card ---
         if use_barista:
             if barista_age is not None:
                 summary_line = (
@@ -1222,7 +1220,7 @@ def main():
                     <div style="background-color:#F0EFEF; padding:26px 20px; border-radius:12px;
                                 text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
                       <div style="font-size:20px; color:#333333; margin-bottom:4px;">
-                        Barista FIRE age
+                        Part Time Work FI Independence Age
                       </div>
                       <div style="font-size:64px; font-weight:700; color:#000000; line-height:1.05;">
                         {barista_age}
@@ -1249,7 +1247,7 @@ def main():
                     <div style="background-color:#F0EFEF; padding:24px 20px; border-radius:12px;
                                 text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
                       <div style="font-size:20px; color:#333333; margin-bottom:6px;">
-                        Barista FIRE age
+                        Part Time Work FI Independence Age
                       </div>
                       <div style="font-size:28px; font-weight:600; color:#CC0000;">
                         Not feasible
@@ -1264,7 +1262,7 @@ def main():
                 )
                 st.markdown(barista_card_html, unsafe_allow_html=True)
 
-    # Barista income series (not shown in table)
+    # Barista income series
     barista_income_series = []
     for row in df_full.itertuples():
         age = row.Age
@@ -1427,7 +1425,7 @@ def main():
         # Put the two charts side by side and make them smaller
         col_ret, col_inc = st.columns(2)
 
-        # Annual return by age chart (nominal only), bar chart, y-axis from 0
+        # Annual return by age chart (nominal only), line chart
         with col_ret:
             st.markdown("#### Annual return by age")
 
@@ -1445,9 +1443,10 @@ def main():
 
             fig_ret = go.Figure()
             fig_ret.add_trace(
-                go.Bar(
+                go.Scatter(
                     x=age_returns_df["Age"],
                     y=age_returns_df["Nominal"],
+                    mode="lines",
                     name="Nominal return",
                 )
             )
@@ -1472,7 +1471,7 @@ def main():
 
             st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
 
-        # Income trajectory chart, y-axis from 0 (now pre-tax income)
+        # Income trajectory chart, y-axis from 0 (pre-tax income)
         with col_inc:
             st.markdown("#### Income trajectory")
 
@@ -1632,7 +1631,7 @@ def main():
 
         if use_barista and "barista_age" in locals() and barista_age is not None:
             assumptions.append(
-                f"- Barista bridge: contributions stop at age {barista_age}. "
+                f"- Part-time bridge: contributions stop at age {barista_age}. "
                 f"Part-time income `${barista_income_today:,.0f}`/yr, extra health `${extra_health_today:,.0f}`/yr, "
                 f"{barista_tax_rate_bridge*100:.0f}% withdrawal tax, and an approximate taxable-need "
                 f"of ${barista_pv_bridge_need_real:,.0f} for the bridge period."
