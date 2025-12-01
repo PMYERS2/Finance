@@ -1371,7 +1371,7 @@ def main():
             ),
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=40, r=40, t=40, b=60),
+            margin=dict(l=20, r=20, t=40, b=40),
             xaxis=dict(
                 title=dict(text="Age (years)", font=dict(size=14)),
                 tickfont=dict(size=12, color="#777777"),
@@ -1662,6 +1662,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
