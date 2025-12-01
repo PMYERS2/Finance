@@ -765,6 +765,89 @@ def main():
     else:
         car_cost_today = first_car_age = car_interval_years = None
 
+    # FI / Barista FIRE settings moved to sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("FI / Barista FIRE settings")
+
+    fi_annual_spend_today = st.sidebar.number_input(
+        "Target annual spending in FI ($/yr, today's)",
+        value=60000,
+        step=5000,
+        min_value=0,
+        key="fi_spend",
+    )
+
+    base_swr_30yr = (
+        st.sidebar.number_input(
+            "Base safe withdrawal rate (% for ~30 yrs)",
+            value=4.0,
+            min_value=1.0,
+            max_value=10.0,
+            step=0.5,
+            key="swr_base",
+        )
+        / 100.0
+    )
+
+    st.sidebar.caption(
+        "FI age is computed using your portfolio path from now to age 90. "
+        "The traditional FI age slider only controls when contributions stop "
+        "and how far the main chart extends."
+    )
+
+    use_barista = st.sidebar.checkbox(
+        "Enable Barista FIRE bridge scenario",
+        value=False,
+        key="barista_toggle",
+    )
+
+    barista_income_today = 0.0
+    barista_end_age = retirement_age
+    barista_tax_rate_bridge = 0.0
+    extra_health_today = 0.0
+
+    if use_barista:
+        barista_income_today = st.sidebar.number_input(
+            "Expected part-time income during bridge ($/yr, today's)",
+            value=50000,
+            step=5000,
+            min_value=0,
+            key="barista_income",
+        )
+
+        extra_health_today = st.sidebar.number_input(
+            "Extra health insurance cost during bridge ($/yr, today's)",
+            value=8000,
+            step=1000,
+            min_value=0,
+            key="barista_health",
+        )
+
+        barista_tax_rate_bridge = (
+            st.sidebar.number_input(
+                "Effective tax rate on portfolio withdrawals during bridge (%)",
+                value=20.0,
+                min_value=0.0,
+                max_value=70.0,
+                step=1.0,
+                key="barista_tax_rate",
+            )
+            / 100.0
+        )
+
+        min_end_age = current_age + 1
+        max_end_age = retirement_age
+        default_end_age = min(max(65, min_end_age), max_end_age)
+
+        barista_end_age = st.sidebar.number_input(
+            "Latest age you might still work part-time",
+            value=default_end_age,
+            min_value=min_end_age,
+            max_value=max_end_age,
+            step=1,
+            key="barista_end_age",
+        )
+
     # Income schedule (after all taxes)
     df_income = build_income_schedule(
         current_age=current_age,
@@ -997,88 +1080,9 @@ def main():
 
     main_left, fi_col = st.columns([4, 2])
 
-    # Right column: FI + Barista bridge
+    # Right column: FI + Barista bridge KPI cards only
     with fi_col:
-        st.markdown("### Financial independence age")
-
-        fi_annual_spend_today = st.number_input(
-            "Target annual spending in FI ($/yr, today's)",
-            value=60000,
-            step=5000,
-            min_value=0,
-            key="fi_spend",
-        )
-
-        base_swr_30yr = (
-            st.number_input(
-                "Base safe withdrawal rate (% for ~30 yrs)",
-                value=4.0,
-                min_value=1.0,
-                max_value=10.0,
-                step=0.5,
-                key="swr_base",
-            )
-            / 100.0
-        )
-
-        st.caption(
-            "FI age is computed using your portfolio path from now to age 90. "
-            "The traditional FI age slider only controls when contributions stop "
-            "and how far the main chart extends."
-        )
-
-        use_barista = st.checkbox(
-            "Show Barista FIRE bridge scenario",
-            value=False,
-            key="barista_toggle",
-        )
-
-        barista_income_today = 0.0
-        barista_end_age = retirement_age
-        barista_tax_rate_bridge = 0.0
-        extra_health_today = 0.0
-
-        if use_barista:
-            barista_income_today = st.number_input(
-                "Expected part-time income during bridge ($/yr, today's)",
-                value=50000,
-                step=5000,
-                min_value=0,
-                key="barista_income",
-            )
-
-            extra_health_today = st.number_input(
-                "Extra health insurance cost during bridge ($/yr, today's)",
-                value=8000,
-                step=1000,
-                min_value=0,
-                key="barista_health",
-            )
-
-            barista_tax_rate_bridge = (
-                st.number_input(
-                    "Effective tax rate on portfolio withdrawals during bridge (%)",
-                    value=20.0,
-                    min_value=0.0,
-                    max_value=70.0,
-                    step=1.0,
-                    key="barista_tax_rate",
-                )
-                / 100.0
-            )
-
-            min_end_age = current_age + 1
-            max_end_age = retirement_age
-            default_end_age = min(max(65, min_end_age), max_end_age)
-
-            barista_end_age = st.number_input(
-                "Latest age you might still work part-time",
-                value=default_end_age,
-                min_value=min_end_age,
-                max_value=max_end_age,
-                step=1,
-                key="barista_end_age",
-            )
+        st.markdown("### FI and Barista FIRE summary")
 
         # --- Compute FI and Barista FI metrics ---
         fi_age, fi_portfolio, fi_required, effective_swr, horizon_years = (
@@ -1087,7 +1091,7 @@ def main():
                 fi_annual_spend_today,
                 infl_rate,
                 show_real,
-                base_swr_30yr,             # <-- fixed variable name here
+                base_swr_30yr,
                 horizon_end_age=max_sim_age,
             )
         )
@@ -1267,6 +1271,7 @@ def main():
         year = row.Year
         if (
             use_barista
+            and "barista_age" in locals()
             and barista_age is not None
             and barista_income_today > 0
             and barista_age <= age <= barista_end_age
@@ -1652,7 +1657,7 @@ def main():
             "home equity is excluded from FI calculations."
         )
 
-        if use_barista and barista_age is not None:
+        if use_barista and "barista_age" in locals() and barista_age is not None:
             assumptions.append(
                 f"- Barista bridge: contributions stop at age {barista_age}. "
                 f"Part-time income `${barista_income_today:,.0f}`/yr, extra health `${extra_health_today:,.0f}`/yr, "
