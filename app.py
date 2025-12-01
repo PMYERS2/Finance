@@ -1429,7 +1429,7 @@ def main():
 
         # Annual return by age chart (nominal + real), y-axis from 0
         with col_ret:
-            st.markdown("#### Annual return by age")
+            st.markdown("###### Annual return by age")
 
             nominal_pct = [r * 100 for r in annual_rates_by_year_full]
             if infl_rate > 0:
@@ -1491,7 +1491,7 @@ def main():
 
         # Income trajectory chart, y-axis from 0
         with col_inc:
-            st.markdown("#### Income trajectory")
+            st.markdown("###### Income trajectory")
 
             fig_inc = go.Figure()
             fig_inc.add_trace(
@@ -1663,6 +1663,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
