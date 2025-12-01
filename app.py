@@ -98,107 +98,126 @@ def adjusted_swr_for_horizon(horizon_years, base_30yr_swr=0.04):
 
 
 def compute_fi_age_horizon(
-    df_dummy,
+    df_full,
+    current_age,
     fi_annual_spend_today,
     infl_rate,
     show_real,
     base_30yr_swr,
-    horizon_end_age,
-    current_age=None,
-    retirement_age=None,
-    start_balance_effective=None,
-    monthly_contrib_by_year_full=None,
-    annual_expense_by_year_nominal_full=None,
-    annual_rates_by_year_full=None,
+    retirement_age,
+    annual_rates_by_year_full,
+    extra_health_today=0.0,
+    tax_rate_bridge=0.0,
 ):
     """
-    NEW DEFINITION:
+    NEW DEFINITION (bridge-style, consistent with Barista):
 
-    FI age = earliest age at which you can stop all investing (contributions = 0
-    from that age onward) and still hit the 4% rule target at your chosen
-    retirement age.
+    FI age = earliest age at which you can:
+      - Quit full-time work;
+      - Set contributions to 0 from that age onward;
+      - Have the portfolio cover:
+          * Target FI spending (today's $) each year, plus
+          * Extra health costs (today's $),
+        grossed up for the withdrawal tax rate; and
+      - Still arrive at the FI target at the traditional FI age:
 
-    Assumptions:
-      - FI target at retirement age (in today's dollars) is:
-          FI_target = fi_annual_spend_today / base_30yr_swr
-      - From FI age to retirement age:
-          * No further contributions
-          * Portfolio compounds at the glide-path return
-          * No *additional* withdrawals before retirement (you cover expenses
-            from income outside this model).
+          FI_target_real = fi_annual_spend_today / base_30yr_swr
 
-    This is a "coast-FI to retirement age" definition.
+    All math is in real (today's) dollars, consistent with the Barista bridge logic.
+
+    This is equivalent to a Barista bridge with barista_income = 0.
     """
 
-    # Basic validation
+    S = fi_annual_spend_today
     if (
-        fi_annual_spend_today <= 0
+        S <= 0
         or base_30yr_swr <= 0
+        or df_full is None
+        or df_full.empty
         or current_age is None
         or retirement_age is None
-        or start_balance_effective is None
-        or monthly_contrib_by_year_full is None
-        or annual_expense_by_year_nominal_full is None
-        or annual_rates_by_year_full is None
+        or retirement_age <= current_age
     ):
         return None, None, None, None, None
 
-    years_full = len(monthly_contrib_by_year_full)
+    # Use same "real" balance logic as Barista
+    balance_real_by_age = {}
+    for row in df_full.itertuples():
+        age = row.Age
+        year = row.Year
+        bal = row.Balance
 
-    # Target in today's dollars at the retirement age, based on 4% rule (or whatever base_30yr_swr is).
-    fi_target_real = fi_annual_spend_today / base_30yr_swr
+        if show_real and infl_rate > 0:
+            bal_real = bal  # df_full already inflation-adjusted in that case
+        else:
+            if infl_rate > 0:
+                bal_real = bal / ((1 + infl_rate) ** year)
+            else:
+                bal_real = bal
+
+        balance_real_by_age[age] = bal_real
+
+    # FI target at traditional FI age (in today's dollars)
+    fi_target_real = S / base_30yr_swr
+
+    t = max(0.0, min(tax_rate_bridge, 0.7))
 
     best_fi_age = None
     best_portfolio_at_ret = None
 
-    # Scan possible FI ages
-    for age0 in range(current_age + 1, retirement_age + 1):
-        # Build candidate contribution schedule: same as base until age0-1 (and < retirement),
-        # zero afterward (coast).
-        monthly_contrib_candidate = []
-        for year_idx in range(years_full):
-            age = current_age + year_idx
-            if age < age0 and age < retirement_age:
-                monthly_contrib_candidate.append(monthly_contrib_by_year_full[year_idx])
-            else:
-                monthly_contrib_candidate.append(0.0)
-
-        # Run account simulation
-        df_cand = compound_schedule(
-            start_balance=start_balance_effective,
-            years=years_full,
-            monthly_contrib_by_year=monthly_contrib_candidate,
-            annual_expense_by_year=annual_expense_by_year_nominal_full,
-            annual_rate_by_year=annual_rates_by_year_full,
-        )
-        df_cand["Age"] = current_age + df_cand["Year"]
-
-        # Find balance at retirement age
-        row_ret = df_cand[df_cand["Age"] == retirement_age]
-        if row_ret.empty:
+    # Scan candidate FI ages (when you quit full-time work & start withdrawals)
+    start_age_candidate = current_age + 1
+    for age0 in range(start_age_candidate, retirement_age + 1):
+        if age0 not in balance_real_by_age:
             continue
-        row_ret = row_ret.iloc[0]
-        bal_nominal = row_ret["Balance"]
-        year_ret = row_ret["Year"]
 
-        # Convert to today's dollars if needed
-        if show_real and infl_rate > 0:
-            bal_real = bal_nominal / ((1 + infl_rate) ** year_ret)
-        else:
-            bal_real = bal_nominal
+        bal = balance_real_by_age[age0]
+        ok = True
 
-        # Check if this FI age is feasible
-        if bal_real >= fi_target_real:
+        # Walk from FI age -> traditional FI age in REAL terms
+        for age in range(age0, retirement_age):
+            idx = age - current_age
+            if idx < 0 or idx >= len(annual_rates_by_year_full):
+                ok = False
+                break
+
+            r_nominal = annual_rates_by_year_full[idx]
+            if infl_rate > 0:
+                real_return = (1 + r_nominal) / (1 + infl_rate) - 1
+            else:
+                real_return = r_nominal
+
+            # No part-time income: portfolio funds full FI spend
+            spend_from_portfolio = S
+            total_real_spend = spend_from_portfolio + max(extra_health_today, 0.0)
+
+            if t > 0:
+                gross_withdrawal = total_real_spend / (1 - t)
+            else:
+                gross_withdrawal = total_real_spend
+
+            bal -= gross_withdrawal
+            if bal < 0:
+                ok = False
+                break
+
+            bal *= (1 + real_return)
+
+        if not ok:
+            continue
+
+        # Check if we still meet FI target at traditional FI age
+        if bal >= fi_target_real:
             best_fi_age = age0
-            best_portfolio_at_ret = bal_real
+            best_portfolio_at_ret = bal
             break
 
     if best_fi_age is None:
-        # Not reachable under these assumptions
+        # Not reachable
         return None, None, fi_target_real, base_30yr_swr, None
 
     horizon_years = retirement_age - best_fi_age
-    effective_swr = base_30yr_swr  # we are explicitly using the base SWR at retirement
+    effective_swr = base_30yr_swr  # still using the base SWR at traditional FI age
 
     return best_fi_age, best_portfolio_at_ret, fi_target_real, effective_swr, horizon_years
 
@@ -863,10 +882,10 @@ def main():
     )
 
     st.sidebar.caption(
-        "FI age is computed as the earliest age where you can stop investing and still "
-        "reach your FI target at the traditional FI age slider using your SWR input. "
-        "The traditional FI age slider controls when you stop all work and when the main "
-        "chart stops, before applying the net-worth override below."
+        "FI age is computed as the earliest age where you can quit full-time work, "
+        "have the portfolio cover your target FI spending (plus any extra health costs) "
+        "from that age up to the traditional FI age, and still land at the FI target "
+        "(spend ÷ SWR) at the traditional FI age slider."
     )
 
     use_barista = st.sidebar.checkbox(
@@ -1097,7 +1116,7 @@ def main():
     for y in range(years_full):
         annual_expense_by_year_nominal_full[y] += housing_adj_by_year_full[y]
 
-    # Base full-path simulation (used mostly for Barista math, not FI age any more)
+    # Base full-path simulation (used for FI and Barista math)
     df_full = compound_schedule(
         start_balance=start_balance_effective,
         years=years_full,
@@ -1157,21 +1176,19 @@ def main():
     with fi_col:
         st.markdown("### FI and Part-Time Work summary")
 
-        # --- Compute FI metrics using new 'coast to retirement' rule ---
+        # --- Compute FI metrics using bridge-style rule (no part-time income) ---
         fi_age, fi_portfolio, fi_required, effective_swr, horizon_years = (
             compute_fi_age_horizon(
-                df_full,
-                fi_annual_spend_today,
-                infl_rate,
-                show_real,
-                base_swr_30yr,
-                horizon_end_age=max_sim_age,  # unused in new logic
+                df_full=df_full,
                 current_age=current_age,
+                fi_annual_spend_today=fi_annual_spend_today,
+                infl_rate=infl_rate,
+                show_real=show_real,
+                base_30yr_swr=base_swr_30yr,
                 retirement_age=retirement_age,
-                start_balance_effective=start_balance_effective,
-                monthly_contrib_by_year_full=monthly_contrib_by_year_full,
-                annual_expense_by_year_nominal_full=annual_expense_by_year_nominal_full,
                 annual_rates_by_year_full=annual_rates_by_year_full,
+                extra_health_today=extra_health_today,
+                tax_rate_bridge=barista_tax_rate_bridge,
             )
         )
 
@@ -1237,10 +1254,10 @@ def main():
                   </div>
                   <div style="font-size:16px; color:#444444; margin-top:14px;">
                     FI target at age {retirement_age}: ${fi_required:,.0f} &bull;
-                    Portfolio at FI (coast path): ${fi_portfolio:,.0f}
+                    Portfolio at traditional FI age (FI path): ${fi_portfolio:,.0f}
                   </div>
                   <div style="font-size:14px; color:#555555; margin-top:6px;">
-                    SWR at retirement: {effective_swr*100:.2f}% &bull;
+                    SWR at traditional FI age: {effective_swr*100:.2f}% &bull;
                     Horizon: ~{horizon_years:.0f} years (FI age {fi_age} → {retirement_age})<br>
                     Base SWR input: {base_swr_30yr*100:.2f}%
                   </div>
@@ -1789,16 +1806,13 @@ def main():
             )
 
         assumptions.append(
-            "- Age-based glide path for returns: higher expected nominal returns early in your career, "
-            "gradually de-risking as you approach and pass traditional FI age."
-        )
-        assumptions.append(
-            "- FI age is the earliest age you can stop investing and still reach the 4% rule "
-            f"target at age {retirement_age}. Home equity is excluded from FI calculations."
+            "- FI age is the earliest age you can stop full-time work, have the portfolio fund "
+            "your target FI spending (plus extra health costs if entered) until the traditional FI age, "
+            "and still meet the 4% rule target at that age. Home equity is excluded from FI math."
         )
         assumptions.append(
             f"- Net worth chart contributions stop at age {stop_work_age_for_chart}; "
-            "FI math itself uses the coast-to-retirement assumption."
+            "no further contributions are made after that age in the chart path."
         )
 
         if use_barista and barista_age is not None:
