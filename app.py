@@ -1468,12 +1468,7 @@ def main():
             )
 
             fig_ret.update_layout(
-                title=dict(
-                    text="Glide-path return",
-                    x=0.5,
-                    xanchor="center",
-                    font=dict(size=16),
-                ),
+              
                 xaxis_title="Age",
                 yaxis_title="Return (%)",
                 yaxis=dict(range=[0, y_max_ret]),
@@ -1672,3 +1667,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
