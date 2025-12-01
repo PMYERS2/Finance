@@ -1087,7 +1087,7 @@ def main():
                 fi_annual_spend_today,
                 infl_rate,
                 show_real,
-                base_30yr_swr,
+                base_swr_30yr,             # <-- fixed variable name here
                 horizon_end_age=max_sim_age,
             )
         )
@@ -1106,7 +1106,7 @@ def main():
             use_barista
             and barista_income_today > 0
             and fi_annual_spend_today > 0
-            and base_30yr_swr > 0
+            and base_swr_30yr > 0
         ):
             (
                 barista_age,
@@ -1123,7 +1123,7 @@ def main():
                 infl_rate=infl_rate,
                 show_real=show_real,
                 annual_rates_by_year_full=annual_rates_by_year_full,
-                base_30yr_swr=base_30yr_swr,
+                base_30yr_swr=base_swr_30yr,
                 barista_end_age=barista_end_age,
                 full_fi_age=retirement_age,
                 tax_rate_bridge=barista_tax_rate_bridge,
@@ -1143,7 +1143,7 @@ def main():
         # --- FI KPI card ---
         if fi_age is not None:
             if effective_swr is None:
-                effective_swr = base_30yr_swr
+                effective_swr = base_swr_30yr
                 horizon_years = (
                     max(max_sim_age - fi_age, 1)
                     if horizon_years is None
@@ -1167,7 +1167,7 @@ def main():
                   <div style="font-size:14px; color:#555555; margin-top:6px;">
                     Effective SWR: {effective_swr*100:.2f}% &bull;
                     Horizon: ~{horizon_years:.0f} years (to age {max_sim_age})<br>
-                    Base 30-year SWR input: {base_30yr_swr*100:.2f}%
+                    Base 30-year SWR input: {base_swr_30yr*100:.2f}%
                   </div>
                 </div>
                 """
