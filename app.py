@@ -59,10 +59,9 @@ def compound_schedule(
         market_growth_year = balance_before_expense - (balance_start_year + contrib_year)
         cum_invest_growth += market_growth_year
 
+        balance -= annual_expense
         expense_drag_year = -annual_expense
         cum_expense_drag += expense_drag_year
-
-        balance = balance_before_expense - annual_expense
         cum_expense_abs += annual_expense
 
         net_growth_cum = cum_invest_growth + cum_expense_drag
@@ -127,7 +126,6 @@ def compute_fi_age_horizon(
 
     This is equivalent to a Barista bridge with barista_income = 0.
     """
-
     S = fi_annual_spend_today
     if (
         S <= 0
@@ -165,7 +163,7 @@ def compute_fi_age_horizon(
     best_fi_age = None
     best_portfolio_at_ret = None
 
-    # Scan candidate FI ages (when you quit full-time work & start withdrawals)
+    # Candidate FI ages (at least 1 year from current age)
     start_age_candidate = current_age + 1
     for age0 in range(start_age_candidate, retirement_age + 1):
         if age0 not in balance_real_by_age:
@@ -271,32 +269,24 @@ def compute_barista_fi_age_bridge(
 
         balance_real_by_age[age] = bal_real
 
-    # FI target at retirement age in today's dollars
     fi_target_real = S / base_30yr_swr
-
-    start_age_candidate = current_age + 1
-    if start_age_candidate >= full_fi_age:
-        return None, None, None, None, None, None
-
-    effective_barista_end_age = min(barista_end_age, full_fi_age - 1)
-    if effective_barista_end_age < start_age_candidate:
-        return None, None, None, None, None, None
 
     best_barista_age = None
     bal_start_best = None
     bal_full_fi_best = None
     pv_bridge_need_best = None
 
-    for age0 in range(start_age_candidate, full_fi_age + 1):
+    for age0 in range(current_age + 1, full_fi_age + 1):
         if age0 not in balance_real_by_age:
             continue
 
-        bal = balance_real_by_age[age0]
-        bal_start_age = bal
-        ok = True
-
+        bal_start_age = balance_real_by_age[age0]
+        bal = bal_start_age
         pv_bridge_need = 0.0
         disc_factor = 1.0
+        ok = True
+
+        effective_barista_end_age = min(barista_end_age, full_fi_age - 1)
 
         for age in range(age0, full_fi_age):
             idx = age - current_age
@@ -344,33 +334,36 @@ def compute_barista_fi_age_bridge(
     if best_barista_age is None:
         return None, None, None, None, None, None
 
-    years_bridge = full_fi_age - best_barista_age
+    fi_target = fi_target_real
+    horizon_years = full_fi_age - best_barista_age
+
     return (
         best_barista_age,
         bal_start_best,
         bal_full_fi_best,
-        fi_target_real,
-        years_bridge,
+        fi_target,
+        horizon_years,
         pv_bridge_need_best,
     )
 
 
 # =========================================================
-# Tax model (federal + FICA + optional state)
+# Tax helper functions
 # =========================================================
 def federal_tax_single_approx(income):
-    """Approximate US federal income tax for a single filer, no deductions."""
+    """
+    Very rough US federal tax approximation using 2023-ish single filer brackets.
+    """
     if income <= 0:
         return 0.0
 
-    # Rough 2024-ish brackets
     brackets = [
-        (0.0, 11600.0, 0.10),
-        (11600.0, 47150.0, 0.12),
-        (47150.0, 100525.0, 0.22),
-        (100525.0, 191950.0, 0.24),
-        (191950.0, 243725.0, 0.32),
-        (243725.0, 609350.0, 0.35),
+        (0, 11000, 0.10),
+        (11000, 44725, 0.12),
+        (44725, 95375, 0.22),
+        (95375, 182100, 0.24),
+        (182100, 231250, 0.32),
+        (231250, 578125, 0.35),
     ]
     top_rate = 0.37
 
@@ -404,60 +397,376 @@ def total_tax_on_earned(income, state_tax_rate):
 
     federal = federal_tax_single_approx(income)
 
-    ss_wage_base = 168600.0
-    ss_rate = 0.062
-    medicare_rate = 0.0145
+    ss_wage_base = 160_200
+    ss_tax = 0.062 * min(income, ss_wage_base)
+    medicare_tax = 0.0145 * income
 
-    ss_tax = ss_rate * min(income, ss_wage_base)
-    medicare_tax = medicare_rate * income
     state_tax = max(state_tax_rate, 0.0) * income
 
     return federal + ss_tax + medicare_tax + state_tax
 
 
+def after_tax_income(income, state_tax_rate):
+    total = total_tax_on_earned(income, state_tax_rate)
+    return max(income - total, 0.0)
+
+
 # =========================================================
-# Income / expense schedule
+# UI + main logic
 # =========================================================
-def build_income_schedule(
-    current_age,
-    retirement_age,
-    start_income,
-    income_growth_rate,
-    expense_today,
-    expense_growth_rate,
-    infl_rate,
-    savings_rate_override=0.0,
-    show_real=True,
-    state_tax_rate=0.0,
-):
-    """
-    Build a per-year income / expense / investable schedule.
-    Returns values in real (today's) dollars if show_real=True, otherwise nominal.
-    """
-    years = retirement_age - current_age
-    rows = []
+def main():
+    st.set_page_config(
+        page_title="Financial Independence / Barista FIRE Simulator",
+        layout="wide",
+    )
 
-    for y in range(years):
-        age = current_age + y
+    st.title("Financial Independence & Barista FIRE Planner")
 
-        income_nominal = start_income * ((1 + income_growth_rate) ** y)
+    # =====================================================
+    # Sidebar inputs
+    # =====================================================
+    with st.sidebar:
+        st.markdown("### Core Setup")
 
-        if show_real and infl_rate > 0:
-            df_y = (1 + infl_rate) ** y
-            income_real = income_nominal / df_y
+        current_age = st.slider("Current age", 20, 60, 30)
+        retirement_age = st.slider("Traditional FI age (target)", 40, 80, 60)
+
+        start_balance_effective = st.number_input(
+            "Starting investment balance ($)",
+            min_value=0.0,
+            value=50_000.0,
+            step=10_000.0,
+            format="%.0f",
+        )
+
+        st.markdown("---")
+        st.markdown("### Income & Savings")
+
+        starting_income = st.number_input(
+            "Current pre-tax income ($/year)",
+            min_value=0.0,
+            value=75_000.0,
+            step=5_000.0,
+            format="%.0f",
+        )
+
+        annual_raise_pct = st.slider(
+            "Expected annual raise (%)",
+            0.0,
+            10.0,
+            3.0,
+            step=0.5,
+        )
+
+        future_big_raise_age = st.slider(
+            "Age for large promotion / raise (0 = none)",
+            0,
+            70,
+            0,
+        )
+        future_big_raise_pct = st.slider(
+            "Promotion raise at that age (%)",
+            0.0,
+            100.0,
+            0.0,
+            step=1.0,
+        )
+
+        savings_rate_override = st.slider(
+            "Target savings rate on after-tax income (0 = infer from expenses)",
+            0.0,
+            0.9,
+            0.0,
+            step=0.05,
+        )
+
+        st.markdown("---")
+        st.markdown("### Spending & Inflation")
+
+        expense_real_base = st.number_input(
+            "Baseline annual spending (today's $)",
+            min_value=0.0,
+            value=40_000.0,
+            step=1_000.0,
+            format="%.0f",
+        )
+
+        infl_rate = st.slider(
+            "Inflation assumption (%)",
+            0.0,
+            10.0,
+            2.5,
+            step=0.25,
+        ) / 100.0
+
+        show_real = st.checkbox("Show values in today's dollars", value=True)
+
+        st.markdown("---")
+        st.markdown("### Investment Returns (Glide Path)")
+
+        annual_rate_base = st.slider(
+            "Central expected annual return (early career, nominal %)",
+            0.0,
+            15.0,
+            7.0,
+            step=0.25,
+        ) / 100.0
+
+        def glide_path_return(age, base_r):
+            """
+            Simple glide path:
+              - Higher return (and volatility) when young
+              - Lower return near retirement
+            """
+            if age <= 35:
+                return base_r + 0.01
+            elif age >= 60:
+                return base_r - 0.02
+            else:
+                frac = (age - 35) / (60 - 35)
+                return (base_r + 0.01) + frac * (-0.03)
+
+        st.markdown("---")
+        st.markdown("### FI / Barista Settings")
+
+        fi_annual_spend_today = st.number_input(
+            "Target annual spending in FI (today's $)",
+            min_value=0.0,
+            value=60_000.0,
+            step=1_000.0,
+            format="%.0f",
+        )
+
+        base_swr_30yr = st.slider(
+            "Base SWR for FI target (30-yr horizon, %)",
+            2.0,
+            6.0,
+            4.0,
+            step=0.1,
+        ) / 100.0
+
+        extra_health_today = st.number_input(
+            "Extra annual health costs in FI (today's $)",
+            min_value=0.0,
+            value=6_000.0,
+            step=500.0,
+            format="%.0f",
+        )
+
+        use_barista = st.checkbox("Model Barista / part-time bridge?", value=True)
+
+        if use_barista:
+            barista_income_today = st.number_input(
+                "Part-time work income (today's $/year)",
+                min_value=0.0,
+                value=25_000.0,
+                step=1_000.0,
+                format="%.0f",
+            )
+
+            barista_start_default = min(retirement_age - 5, max(current_age + 1, 35))
+            barista_end_default = max(barista_start_default + 5, retirement_age - 5)
+
+            barista_age_start_slider = st.slider(
+                "Candidate start age for part-time work (Barista)",
+                current_age + 1,
+                retirement_age - 1,
+                barista_start_default,
+            )
+            barista_end_age = st.slider(
+                "Age until you keep working part-time",
+                barista_age_start_slider,
+                retirement_age - 1,
+                barista_end_default,
+            )
+
+            barista_tax_rate_bridge = st.slider(
+                "Effective tax rate on withdrawals during Barista / FI (%)",
+                0.0,
+                40.0,
+                10.0,
+                step=1.0,
+            ) / 100.0
         else:
-            income_real = income_nominal
+            barista_income_today = 0.0
+            barista_end_age = retirement_age - 1
+            barista_tax_rate_bridge = 0.0
 
-        tax_real = total_tax_on_earned(income_real, state_tax_rate)
-        after_tax_income_real = max(income_real - tax_real, 0.0)
+        st.markdown("---")
+        st.markdown("### Tax Settings")
 
-        expense_real_base = expense_today * ((1 + expense_growth_rate) ** y)
+        state_tax_rate = st.slider(
+            "State income tax rate (%)",
+            0.0,
+            15.0,
+            0.0,
+            step=0.5,
+        ) / 100.0
+
+        st.markdown("---")
+        st.markdown("### Housing / Home Equity (Optional)")
+
+        include_home = st.checkbox("Include home / housing in net worth?", value=True)
+
+        if include_home:
+            current_home_value = st.number_input(
+                "Current home value ($)",
+                min_value=0.0,
+                value=400_000.0,
+                step=25_000.0,
+                format="%.0f",
+            )
+            current_home_equity = st.number_input(
+                "Current home equity ($)",
+                min_value=0.0,
+                value=80_000.0,
+                step=10_000.0,
+                format="%.0f",
+            )
+
+            home_appreciation_rate = st.slider(
+                "Home price appreciation rate (%)",
+                0.0,
+                10.0,
+                3.0,
+                step=0.25,
+            ) / 100.0
+
+            monthly_housing_cost_today = st.number_input(
+                "Current monthly housing cost (mortgage+tax+insurance, today's $)",
+                min_value=0.0,
+                value=2_000.0,
+                step=100.0,
+                format="%.0f",
+            )
+
+            housing_cost_change_age = st.slider(
+                "Age at which housing cost changes (downsizing / payoff)",
+                current_age,
+                retirement_age,
+                retirement_age,
+            )
+
+            new_monthly_housing_cost_today = st.number_input(
+                "New monthly housing cost at that age (today's $)",
+                min_value=0.0,
+                value=1_200.0,
+                step=100.0,
+                format="%.0f",
+            )
+
+            extra_home_maintenance_today = st.number_input(
+                "Extra annual home maintenance (today's $)",
+                min_value=0.0,
+                value=3_000.0,
+                step=500.0,
+                format="%.0f",
+            )
+
+            home_purchase_future_age = st.slider(
+                "Age at which you might buy a new primary home (0 = none)",
+                0,
+                80,
+                0,
+            )
+            future_home_price_today = st.number_input(
+                "Future home price (if buying later, today's $)",
+                min_value=0.0,
+                value=500_000.0,
+                step=25_000.0,
+                format="%.0f",
+            )
+            future_down_payment_pct = st.slider(
+                "Down payment (%) for future home",
+                0.0,
+                50.0,
+                20.0,
+                step=1.0,
+            ) / 100.0
+        else:
+            current_home_value = 0.0
+            current_home_equity = 0.0
+            home_appreciation_rate = 0.0
+            monthly_housing_cost_today = 0.0
+            housing_cost_change_age = retirement_age
+            new_monthly_housing_cost_today = 0.0
+            extra_home_maintenance_today = 0.0
+            home_purchase_future_age = 0
+            future_home_price_today = 0.0
+            future_down_payment_pct = 0.0
+
+        st.markdown("---")
+        st.markdown("### Display & Advanced Options")
+
+        years_full = max(1, retirement_age - current_age + 30)
+        years_full = st.slider(
+            "Projection horizon (years from now)",
+            10,
+            60,
+            years_full,
+        )
+
+    # =====================================================
+    # Income trajectory and investable cash
+    # =====================================================
+    years_list = list(range(years_full))
+    ages = [current_age + y for y in years_list]
+
+    incomes_nominal = []
+    for y in years_list:
+        age = current_age + y
+        income = starting_income
+
+        if age > current_age:
+            income *= (1 + annual_raise_pct / 100.0) if annual_raise_pct > 1 else (
+                1 + annual_raise_pct
+            )
+
+        if future_big_raise_age > 0 and age >= future_big_raise_age:
+            if future_big_raise_pct > 0:
+                income *= 1 + future_big_raise_pct / 100.0
+
+        incomes_nominal.append(income)
+
+    after_tax_incomes_real = []
+    expense_real_list = []
+    investable_real_list = []
+    savings_rate_actual_list = []
+
+    for y, age in zip(years_list, ages):
+        income_nominal = incomes_nominal[y]
+
+        if infl_rate > 0:
+            income_real_today = income_nominal / ((1 + infl_rate) ** y)
+        else:
+            income_real_today = income_nominal
+
+        tax_nominal = total_tax_on_earned(income_nominal, state_tax_rate)
+        after_tax_nominal = income_nominal - tax_nominal
+
+        if infl_rate > 0:
+            after_tax_income_real = after_tax_nominal / ((1 + infl_rate) ** y)
+        else:
+            after_tax_income_real = after_tax_nominal
+
+        after_tax_incomes_real.append(after_tax_income_real)
+
+        expense_real = expense_real_base
+        if age >= retirement_age:
+            expense_real *= 0.9
+
+        if infl_rate > 0:
+            expense_nominal = expense_real * ((1 + infl_rate) ** y)
+        else:
+            expense_nominal = expense_real
+
+        expense_real_list.append(expense_real)
 
         if savings_rate_override > 0:
             investable_real = after_tax_income_real * savings_rate_override
             implied_expense_real = after_tax_income_real - investable_real
         else:
-            implied_expense_real = expense_real_base
+            implied_expense_real = expense_real
             investable_real = max(after_tax_income_real - implied_expense_real, 0.0)
 
         if after_tax_income_real > 0:
@@ -469,494 +778,15 @@ def build_income_schedule(
             {
                 "YearIndex": y,
                 "Age": age,
-                "IncomeRealBeforeTax": income_real,
-                "TaxReal": tax_real,
-                "IncomeRealAfterTax": after_tax_income_real,
-                "ExpensesReal": implied_expense_real,
-                "InvestableRealAnnual": investable_real,
-                "InvestableRealMonthly": investable_real / 12.0,
-                "SavingsRate": savings_rate_actual,
+                "IncomeNominal": income_nominal,
+                "AfterTaxIncomeReal": after_tax_income_real,
+                "ExpenseReal": implied_expense_real,
+                "InvestableReal": investable_real,
+                "SavingsRateActual": savings_rate_actual,
             }
         )
 
-    return pd.DataFrame(rows)
-
-
-# =========================================================
-# Glide path
-# =========================================================
-def glide_path_return(age, base_return):
-    if age <= 35:
-        return base_return + 0.01
-    elif age <= 45:
-        return base_return + 0.005
-    elif age <= 55:
-        return base_return
-    elif age <= 65:
-        return base_return - 0.01
-    else:
-        return base_return - 0.015
-
-
-# =========================================================
-# Main app
-# =========================================================
-def main():
-    st.set_page_config(page_title="Personal FI Planner", layout="wide")
-    st.title("Personal FI Planner")
-
-    st.sidebar.header("Core inputs")
-
-    current_age = st.sidebar.number_input(
-        "Current age (years)", value=26, min_value=0, max_value=100, step=1
-    )
-
-    retirement_age_input = st.sidebar.number_input(
-        "Traditional FI age (years – when you stop all work)",
-        value=60,
-        min_value=1,
-        max_value=100,
-        step=1,
-    )
-
-    max_sim_age = 90
-    retirement_age = min(retirement_age_input, max_sim_age)
-
-    years_plot = retirement_age - current_age
-    if years_plot <= 0:
-        st.error(
-            "Traditional FI age must be greater than current age and below the FI horizon (90)."
-        )
-        return
-
-    start_balance_input = st.sidebar.number_input(
-        "Starting total investment balance ($)",
-        value=100000,
-        step=1000,
-        min_value=0,
-    )
-
-    annual_rate_base = (
-        st.sidebar.slider(
-            "Annual return (adjusts closer to retirement) (%/yr, nominal)",
-            min_value=0.0,
-            max_value=20.0,
-            value=8.0,
-            step=0.5,
-        )
-        / 100.0
-    )
-
-    infl_rate = (
-        st.sidebar.number_input(
-            "Assumed annual inflation (%/yr)",
-            value=3.0,
-            step=0.1,
-            min_value=0.0,
-            max_value=20.0,
-        )
-        / 100.0
-    )
-
-    show_real = st.sidebar.checkbox(
-        "Show values in today's dollars (inflation-adjusted)", value=True
-    )
-
-    # Income & expenses
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Income & expenses")
-
-    start_income = st.sidebar.number_input(
-        "Current pre-tax income ($/yr)",
-        value=90000,
-        step=5000,
-        min_value=0,
-        key="start_income",
-    )
-
-    income_growth_rate = (
-        st.sidebar.number_input(
-            "Income growth (%/yr)",
-            value=3.0,
-            step=0.5,
-            min_value=0.0,
-            max_value=20.0,
-            key="income_growth",
-        )
-        / 100.0
-    )
-
-    state_tax_rate = (
-        st.sidebar.number_input(
-            "State income tax rate (% of income)",
-            value=0.0,
-            step=0.5,
-            min_value=0.0,
-            max_value=20.0,
-            key="state_tax_rate",
-        )
-        / 100.0
-    )
-
-    expense_today = st.sidebar.number_input(
-        "Current total expenses (per year, today's dollars)",
-        value=36000,
-        step=1000,
-        min_value=0,
-        key="expense_today",
-    )
-
-    expense_growth_rate = (
-        st.sidebar.number_input(
-            "Expense growth (%/yr above inflation)",
-            value=0.0,
-            step=0.5,
-            min_value=0.0,
-            max_value=20.0,
-            key="expense_growth",
-        )
-        / 100.0
-    )
-
-    savings_rate_override = (
-        st.sidebar.slider(
-            "Optional savings rate (% of after-tax income, overrides explicit expenses if > 0)",
-            min_value=0.0,
-            max_value=80.0,
-            value=0.0,
-            step=1.0,
-            key="savings_rate_override",
-        )
-        / 100.0
-    )
-
-    # Additional customization (home, kids, cars)
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Additional customization")
-    st.sidebar.subheader("Home")
-
-    include_home = st.sidebar.checkbox("Include home in plan", key="home_toggle")
-
-    current_rent = st.sidebar.number_input(
-        "Current rent ($/month – only needed if buying or upgrading home)",
-        value=1100,
-        step=50,
-        min_value=0,
-    )
-
-    est_prop_tax_monthly = st.sidebar.number_input(
-        "Estimated property tax + insurance ($/month at purchase)",
-        value=300,
-        step=50,
-        min_value=0,
-    )
-
-    home_status = None
-    home_app_rate = 0.0
-    maintenance_pct = 0.0
-    home_price_today = 0.0
-    current_home_value_today = 0.0
-    planned_purchase_age = current_age
-    down_payment_pct = 0.0
-    mortgage_rate = 0.0
-    mortgage_term_years = 30
-    years_remaining_loan = 0
-    equity_amount_now = 0.0
-    mortgage_payment = 0.0
-    purchase_idx = 10**9
-    loan_amount = 0.0
-    n_payments = 0
-    r_m = 0.0
-
-    if include_home:
-        home_app_rate = (
-            st.sidebar.number_input(
-                "Home appreciation (%/yr)",
-                value=3.0,
-                step=0.1,
-                min_value=-10.0,
-                max_value=20.0,
-                key="home_app_rate",
-            )
-            / 100.0
-        )
-
-        maintenance_pct = (
-            st.sidebar.number_input(
-                "Annual maintenance (% of home value)",
-                value=1.0,
-                step=0.1,
-                min_value=0.0,
-                max_value=10.0,
-                key="maint_pct",
-            )
-            / 100.0
-        )
-
-        home_status = st.sidebar.radio(
-            "Home status",
-            ["I already own a home", "I plan to buy"],
-            index=0,
-            key="home_status",
-        )
-
-        if home_status == "I already own a home":
-            current_home_value_today = st.sidebar.number_input(
-                "Current home value ($, today's)",
-                value=400000,
-                step=10000,
-                min_value=0,
-                key="home_value_now",
-            )
-
-            equity_amount_now = st.sidebar.number_input(
-                "Current home equity you own ($)",
-                value=120000,
-                step=10000,
-                min_value=0,
-                key="equity_amount_now",
-            )
-
-            years_remaining_loan = st.sidebar.number_input(
-                "Years remaining on mortgage",
-                value=25,
-                min_value=0,
-                max_value=40,
-                step=1,
-                key="years_remaining_loan",
-            )
-
-            mortgage_rate = (
-                st.sidebar.number_input(
-                    "Mortgage interest rate (%/yr)",
-                    value=6.5,
-                    step=0.1,
-                    min_value=0.0,
-                    max_value=20.0,
-                    key="mort_rate_own",
-                )
-                / 100.0
-            )
-
-        else:
-            home_price_today = st.sidebar.number_input(
-                "Target home price ($, today's)",
-                value=400000,
-                step=10000,
-                min_value=0,
-                key="target_home_price",
-            )
-            planned_purchase_age = st.sidebar.number_input(
-                "Planned purchase age (years)",
-                value=current_age,
-                min_value=current_age,
-                max_value=max_sim_age,
-                step=1,
-                key="purchase_age",
-            )
-            down_payment_pct = (
-                st.sidebar.number_input(
-                    "Down payment (% of price)",
-                    value=20.0,
-                    min_value=0.0,
-                    max_value=100.0,
-                    step=1.0,
-                    key="dp_pct",
-                )
-                / 100.0
-            )
-
-            mortgage_rate = (
-                st.sidebar.number_input(
-                    "Mortgage interest rate (%/yr)",
-                    value=6.5,
-                    step=0.1,
-                    min_value=0.0,
-                    max_value=20.0,
-                    key="mort_rate_buy",
-                )
-                / 100.0
-            )
-
-            mortgage_term_years = st.sidebar.radio(
-                "Loan term (years)",
-                [15, 30],
-                index=1,
-                key="mort_term",
-            )
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Future expenses (today's $)")
-
-    use_kid_expenses = st.sidebar.checkbox("Add kid-related annual expenses", key="kid_exp")
-
-    if use_kid_expenses:
-        default_kid_start = current_age + 2
-        default_kid_end = min(retirement_age, default_kid_start + 18)
-
-        kids_start_age = st.sidebar.number_input(
-            "Kid expense start age (years)",
-            value=default_kid_start,
-            min_value=current_age + 1,
-            max_value=retirement_age,
-            step=1,
-            key="kids_start_age",
-        )
-        kids_end_age = st.sidebar.number_input(
-            "Kid expense end age (years)",
-            value=default_kid_end,
-            min_value=kids_start_age,
-            max_value=retirement_age,
-            step=1,
-            key="kids_end_age",
-        )
-        num_kids = st.sidebar.number_input(
-            "Number of kids",
-            value=2,
-            min_value=1,
-            max_value=10,
-            step=1,
-            key="num_kids",
-        )
-        annual_cost_per_kid_today = st.sidebar.number_input(
-            "Annual cost per kid ($/yr, today's)",
-            value=10000,
-            step=1000,
-            min_value=0,
-            key="kid_cost",
-        )
-    else:
-        kids_start_age = kids_end_age = num_kids = annual_cost_per_kid_today = None
-
-    use_car_expenses = st.sidebar.checkbox("Add car replacement expenses", key="car_exp")
-
-    if use_car_expenses:
-        car_cost_today = st.sidebar.number_input(
-            "Cost per car ($, today's)",
-            value=30000,
-            step=1000,
-            min_value=0,
-            key="car_cost",
-        )
-        first_car_age = st.sidebar.number_input(
-            "First replacement age (years)",
-            value=current_age + 5,
-            min_value=current_age + 1,
-            max_value=retirement_age,
-            step=1,
-            key="first_car_age",
-        )
-        car_interval_years = st.sidebar.number_input(
-            "Replacement interval (years)",
-            value=8,
-            min_value=1,
-            max_value=50,
-            step=1,
-            key="car_interval",
-        )
-    else:
-        car_cost_today = first_car_age = car_interval_years = None
-
-    # FI / Barista FIRE settings
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("FI / Barista FIRE settings")
-
-    fi_annual_spend_today = st.sidebar.number_input(
-        "Target annual spending in FI ($/yr, today's)",
-        value=60000,
-        step=5000,
-        min_value=0,
-        key="fi_spend",
-    )
-
-    base_swr_30yr = (
-        st.sidebar.number_input(
-            "Base safe withdrawal rate (% for ~30 yrs)",
-            value=4.0,
-            min_value=1.0,
-            max_value=10.0,
-            step=0.5,
-            key="swr_base",
-        )
-        / 100.0
-    )
-
-    st.sidebar.caption(
-        "FI age is computed as the earliest age where you can quit full-time work, "
-        "have the portfolio cover your target FI spending (plus any extra health costs) "
-        "from that age up to the traditional FI age, and still land at the FI target "
-        "(spend ÷ SWR) at the traditional FI age slider."
-    )
-
-    use_barista = st.sidebar.checkbox(
-        "Enable Barista FIRE bridge scenario",
-        value=False,
-        key="barista_toggle",
-    )
-
-    barista_income_today = 0.0
-    barista_end_age = retirement_age
-    barista_tax_rate_bridge = 0.0
-    extra_health_today = 0.0
-
-    if use_barista:
-        barista_income_today = st.sidebar.number_input(
-            "Expected part-time income during bridge ($/yr, today's)",
-            value=50000,
-            step=5000,
-            min_value=0,
-            key="barista_income",
-        )
-
-        extra_health_today = st.sidebar.number_input(
-            "Extra health insurance cost during bridge ($/yr, today's)",
-            value=8000,
-            step=1000,
-            min_value=0,
-            key="barista_health",
-        )
-
-        barista_tax_rate_bridge = (
-            st.sidebar.number_input(
-                "Effective tax rate on portfolio withdrawals during bridge (%)",
-                value=20.0,
-                min_value=0.0,
-                max_value=70.0,
-                step=1.0,
-                key="barista_tax_rate",
-            )
-            / 100.0
-        )
-
-        min_end_age = current_age + 1
-        max_end_age = retirement_age
-        default_end_age = min(max(65, min_end_age), max_end_age)
-
-        barista_end_age = st.sidebar.number_input(
-            "Latest age you might still work part-time",
-            value=default_end_age,
-            min_value=min_end_age,
-            max_value=max_end_age,
-            step=1,
-            key="barista_end_age",
-        )
-
-    # Income schedule
-    df_income = build_income_schedule(
-        current_age=current_age,
-        retirement_age=retirement_age,
-        start_income=start_income,
-        income_growth_rate=income_growth_rate,
-        expense_today=expense_today,
-        expense_growth_rate=expense_growth_rate,
-        infl_rate=infl_rate,
-        savings_rate_override=savings_rate_override,
-        show_real=show_real,
-        state_tax_rate=state_tax_rate,
-    )
-
-    # Full-horizon schedules
-    years_full = max_sim_age - current_age
+    df_income = pd.DataFrame(rows)
 
     annual_rates_by_year_full = []
     for y in range(years_full):
@@ -977,141 +807,62 @@ def main():
             val = 0.0
         monthly_contrib_by_year_full.append(val)
 
+    # Expenses (non-FI, e.g., housing, maintenance, etc.)
     annual_expense_by_year_nominal_full = [0.0 for _ in range(years_full)]
+
+    # Housing cost path
+    housing_adj_by_year_full = [0.0 for _ in range(years_full)]
     home_price_by_year_full = [0.0 for _ in range(years_full)]
     home_equity_by_year_full = [0.0 for _ in range(years_full)]
-    housing_adj_by_year_full = [0.0 for _ in range(years_full)]
 
-    start_balance_effective = start_balance_input
-
-    # Kids
-    for year_idx in range(years_full):
-        age_end_of_year = current_age + year_idx + 1
-        if use_kid_expenses:
-            if kids_start_age <= age_end_of_year <= kids_end_age:
-                expense_real = num_kids * annual_cost_per_kid_today
-                expense_nominal = expense_real * ((1 + infl_rate) ** (year_idx + 1))
-                annual_expense_by_year_nominal_full[year_idx] += expense_nominal
-
-    # Cars
-    for year_idx in range(years_full):
-        age_end_of_year = current_age + year_idx + 1
-        if (
-            use_car_expenses
-            and car_interval_years
-            and car_interval_years > 0
-            and first_car_age is not None
-        ):
-            if age_end_of_year >= first_car_age:
-                if (age_end_of_year - first_car_age) % car_interval_years == 0:
-                    expense_real = car_cost_today
-                    expense_nominal = expense_real * ((1 + infl_rate) ** (year_idx + 1))
-                    annual_expense_by_year_nominal_full[year_idx] += expense_nominal
-
-    # Home
     if include_home:
-        if home_status == "I already own a home":
-            base_price_today = current_home_value_today
-            purchase_idx = 0
+        home_price = current_home_value
+        home_equity = current_home_equity
 
-            outstanding_now = max(base_price_today - equity_amount_now, 0.0)
-            loan_amount = outstanding_now
+        for y in range(years_full):
+            age = current_age + y
 
-            if years_remaining_loan > 0 and loan_amount > 0:
-                r_m = mortgage_rate / 12.0
-                n_payments = years_remaining_loan * 12
-                if r_m > 0:
-                    mortgage_payment = loan_amount * r_m / (1 - (1 + r_m) ** (-n_payments))
-                else:
-                    mortgage_payment = loan_amount / n_payments
+            if y == 0:
+                home_price_by_year_full[y] = home_price
+                home_equity_by_year_full[y] = home_equity
             else:
-                r_m = 0.0
-                n_payments = 0
-                mortgage_payment = 0.0
+                home_price *= 1 + home_appreciation_rate
+                home_equity *= 1 + home_appreciation_rate
+                home_price_by_year_full[y] = home_price
+                home_equity_by_year_full[y] = home_equity
 
-            purchase_price_nominal = base_price_today
+            housing_cost_real = monthly_housing_cost_today * 12.0
+            if age >= housing_cost_change_age:
+                housing_cost_real = new_monthly_housing_cost_today * 12.0
 
-        else:
-            base_price_today = home_price_today
-            purchase_idx = max(0, planned_purchase_age - current_age - 1)
-            years_until_purchase = purchase_idx + 1
-
-            purchase_price_nominal = base_price_today * (
-                (1 + home_app_rate) ** years_until_purchase
-            )
-            loan_amount = purchase_price_nominal * (1.0 - down_payment_pct)
-
-            r_m = mortgage_rate / 12.0
-            n_payments = mortgage_term_years * 12
-            if n_payments > 0 and loan_amount > 0:
-                if r_m > 0:
-                    mortgage_payment = loan_amount * r_m / (1 - (1 + r_m) ** (-n_payments))
-                else:
-                    mortgage_payment = loan_amount / n_payments
+            if infl_rate > 0:
+                housing_cost_nominal = housing_cost_real * ((1 + infl_rate) ** y)
             else:
-                mortgage_payment = 0.0
-                r_m = 0.0
-                n_payments = 0
+                housing_cost_nominal = housing_cost_real
 
-        for year_idx in range(years_full):
-            years_from_now = year_idx + 1
-            price_nominal = base_price_today * ((1 + home_app_rate) ** years_from_now)
+            housing_adj_by_year_full[y] = housing_cost_nominal
 
-            if year_idx >= purchase_idx:
-                home_price_by_year_full[year_idx] = price_nominal
+            maint_real = extra_home_maintenance_today
+            if infl_rate > 0:
+                maint_nominal = maint_real * ((1 + infl_rate) ** y)
             else:
-                home_price_by_year_full[year_idx] = 0.0
+                maint_nominal = maint_real
 
-            if loan_amount <= 0 or n_payments == 0:
-                if year_idx >= purchase_idx:
-                    home_equity_by_year_full[year_idx] = price_nominal
-                else:
-                    home_equity_by_year_full[year_idx] = 0.0
-            else:
-                if year_idx < purchase_idx:
-                    home_equity_by_year_full[year_idx] = 0.0
-                else:
-                    years_since_purchase = year_idx - purchase_idx + 1
-                    k = min(years_since_purchase * 12, n_payments)
+            annual_expense_by_year_nominal_full[y] += maint_nominal
 
-                    if k == 0:
-                        outstanding = loan_amount
+        if home_purchase_future_age > 0:
+            for y in range(years_full):
+                age = current_age + y
+                if age == home_purchase_future_age:
+                    if infl_rate > 0:
+                        future_home_price_nominal = future_home_price_today * (
+                            (1 + infl_rate) ** y
+                        )
                     else:
-                        if r_m > 0:
-                            outstanding = (
-                                loan_amount * (1 + r_m) ** k
-                                - mortgage_payment * ((1 + r_m) ** k - 1) / r_m
-                            )
-                        else:
-                            outstanding = max(loan_amount - mortgage_payment * k, 0.0)
+                        future_home_price_nominal = future_home_price_today
 
-                    if k >= n_payments:
-                        outstanding = 0.0
-
-                    equity = max(price_nominal - outstanding, 0.0)
-                    home_equity_by_year_full[year_idx] = equity
-
-            if year_idx >= purchase_idx:
-                maint_nominal = price_nominal * maintenance_pct
-                annual_expense_by_year_nominal_full[year_idx] += maint_nominal
-
-        if home_status == "I plan to buy":
-            if purchase_idx < years_full:
-                down_payment_nominal = purchase_price_nominal * down_payment_pct
-
-                if planned_purchase_age == current_age:
-                    start_balance_effective = max(
-                        0.0, start_balance_effective - down_payment_nominal
-                    )
-                else:
-                    annual_expense_by_year_nominal_full[purchase_idx] += down_payment_nominal
-
-    if include_home and home_status == "I plan to buy" and mortgage_payment > 0:
-        total_monthly_owner_cost = mortgage_payment + est_prop_tax_monthly
-        extra_housing_monthly = total_monthly_owner_cost - current_rent
-        for year_idx in range(years_full):
-            if year_idx >= purchase_idx:
-                housing_adj_by_year_full[year_idx] = extra_housing_monthly * 12
+                    down_payment_nominal = future_home_price_nominal * future_down_payment_pct
+                    annual_expense_by_year_nominal_full[y] += down_payment_nominal
 
     for y in range(years_full):
         annual_expense_by_year_nominal_full[y] += housing_adj_by_year_full[y]
@@ -1130,12 +881,10 @@ def main():
     df_full["HomeEquity"] = home_equity_by_year_full
     df_full["NetWorth"] = df_full["Balance"] + df_full["HomeEquity"]
     df_full["HousingDelta"] = housing_adj_by_year_full
-    df_full["NetContributions"] = df_full["CumContributions"] + df_full["ExpenseDrag"]
 
     if show_real and infl_rate > 0:
         df_full["DF_end"] = (1 + infl_rate) ** df_full["Year"]
         df_full["DF_mid"] = (1 + infl_rate) ** (df_full["Year"] - 1)
-
         for col in [
             "Balance",
             "InvestGrowth",
@@ -1143,27 +892,12 @@ def main():
             "HomePrice",
             "HomeEquity",
             "NetWorth",
+            "CumContributions",
+            "ExpenseDrag",
+            "CumulativeExpense",
+            "NetGrowth",
         ]:
             df_full[col] = df_full[col] / df_full["DF_end"]
-
-        cum_contrib_real = 0.0
-        cum_expense_drag_real = 0.0
-        cum_expense_abs_real = 0.0
-        net_contrib_cum_real = 0.0
-
-        for idx in range(len(df_full)):
-            c = df_full.loc[idx, "ContribYear"]
-            e = df_full.loc[idx, "AnnualExpense"]
-
-            cum_contrib_real += c
-            cum_expense_drag_real += -e
-            cum_expense_abs_real += e
-            net_contrib_cum_real = cum_contrib_real + cum_expense_drag_real
-
-            df_full.loc[idx, "CumContributions"] = cum_contrib_real
-            df_full.loc[idx, "ExpenseDrag"] = cum_expense_drag_real
-            df_full.loc[idx, "CumulativeExpense"] = cum_expense_abs_real
-            df_full.loc[idx, "NetContributions"] = net_contrib_cum_real
     else:
         df_full["DF_end"] = 1.0
         df_full["DF_mid"] = 1.0
@@ -1192,26 +926,18 @@ def main():
             )
         )
 
-        (
-            barista_age,
-            barista_start_balance_real,
-            barista_fi_balance_real,
-            barista_fi_target_real,
-            barista_bridge_years,
-            barista_pv_bridge_need_real,
-        ) = (None, None, None, None, None, None)
+        barista_age = None
+        barista_start_balance_real = None
+        barista_portfolio_at_fi_real = None
+        barista_bridge_years = None
+        barista_pv_bridge_need_real = None
         taxable_ratio_rec = None
 
-        if (
-            use_barista
-            and barista_income_today > 0
-            and fi_annual_spend_today > 0
-            and base_swr_30yr > 0
-        ):
+        if use_barista:
             (
                 barista_age,
                 barista_start_balance_real,
-                barista_fi_balance_real,
+                barista_portfolio_at_fi_real,
                 barista_fi_target_real,
                 barista_bridge_years,
                 barista_pv_bridge_need_real,
@@ -1246,8 +972,8 @@ def main():
                 f"""
                 <div style="background-color:#E5E5E5; padding:30px 20px; border-radius:12px;
                             text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
-                  <div style="font-size:20px; color:#333333; margin-bottom:4px;">
-                    Financial independence age
+                  <div style="font-size:18px; color:#333333; margin-bottom:4px;">
+                    FI independence age
                   </div>
                   <div style="font-size:72px; font-weight:700; color:#000000; line-height:1.05;">
                     {fi_age}
@@ -1268,106 +994,61 @@ def main():
         else:
             fi_card_html = textwrap.dedent(
                 """
-                <div style="background-color:#E5E5E5; padding:24px 20px; border-radius:12px;
-                            text-align:center; margin-bottom:16px; border:1px solid #CFCFCF;">
-                  <div style="font-size:18px; color:#333333; margin-bottom:6px;">
-                    Financial independence age
-                  </div>
-                  <div style="font-size:32px; font-weight:600; color:#CC0000;">
-                    Not reached (under current assumptions)
+                <div style="background-color:#F5F5F5; padding:24px 18px; border-radius:12px;
+                            text-align:center; margin-bottom:20px; border:1px solid #E0E0E0;">
+                  <div style="font-size:16px; color:#555555;">
+                    FI independence age not reachable under current assumptions.
                   </div>
                 </div>
                 """
             )
             st.markdown(fi_card_html, unsafe_allow_html=True)
 
-        # --- Part-time work FI independence KPI card ---
-        if use_barista:
-            if barista_age is not None:
+        # --- Barista KPI card ---
+        if use_barista and barista_age is not None:
+            if taxable_ratio_rec is not None:
                 summary_line = (
-                    f"Part-time from age {barista_age} to {barista_end_age} "
-                    f"(~{barista_bridge_years:.0f} years) before full FI at age {retirement_age}."
+                    f"Bridge duration: ~{barista_bridge_years:.0f} years "
+                    f"(age {barista_age} → {retirement_age}). "
+                    f"Estimated PV of withdrawals during bridge: "
+                    f"${barista_pv_bridge_need_real:,.0f} in today's dollars "
+                    f"(~{taxable_ratio_rec*100:.0f}% of portfolio at Part-Time age)."
                 )
-
-                target_line = (
-                    f"FI target at age {retirement_age}: ${barista_fi_target_real:,.0f} &bull; "
-                    f"Projected portfolio at FI (bridge path): ${barista_fi_balance_real:,.0f}"
-                )
-
-                taxable_line = ""
-                if taxable_ratio_rec is not None and barista_pv_bridge_need_real is not None:
-                    taxable_line = (
-                        f"Bridge withdrawals present value: ${barista_pv_bridge_need_real:,.0f} "
-                        f"(~{taxable_ratio_rec*100:.0f}% of portfolio at Part-Time age)."
-                    )
-
-                barista_card_html = textwrap.dedent(
-                    f"""
-                    <div style="background-color:#F0EFEF; padding:26px 20px; border-radius:12px;
-                                text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
-                      <div style="font-size:20px; color:#333333; margin-bottom:4px;">
-                        Part Time Work FI Independence Age
-                      </div>
-                      <div style="font-size:64px; font-weight:700; color:#000000; line-height:1.05;">
-                        {barista_age}
-                      </div>
-                      <div style="font-size:15px; color:#444444; margin-top:12px;">
-                        {summary_line}
-                      </div>
-                      <div style="font-size:14px; color:#555555; margin-top:6px;">
-                        Part-time income: ${barista_income_today:,.0f}/yr &bull;
-                        Extra health costs: ${extra_health_today:,.0f}/yr &bull;
-                        Withdrawal tax: {barista_tax_rate_bridge*100:.0f}%
-                      </div>
-                      <div style="font-size:14px; color:#555555; margin-top:6px;">
-                        {target_line}
-                      </div>
-                      {f'<div style="font-size:13px; color:#666666; margin-top:6px;">{taxable_line}</div>' if taxable_line else ''}
-                    </div>
-                    """
-                )
-                st.markdown(barista_card_html, unsafe_allow_html=True)
             else:
-                barista_card_html = textwrap.dedent(
-                    f"""
-                    <div style="background-color:#F0EFEF; padding:24px 20px; border-radius:12px;
-                                text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
-                      <div style="font-size:20px; color:#333333; margin-bottom:6px;">
-                        Part Time Work FI Independence Age
-                      </div>
-                      <div style="font-size:28px; font-weight:600; color:#CC0000;">
-                        Not feasible
-                      </div>
-                      <div style="font-size:13px; color:#555555; margin-top:8px;">
-                        With ${barista_income_today:,.0f}/yr part-time income, extra health costs of
-                        ${extra_health_today:,.0f}/yr, and a {barista_tax_rate_bridge*100:.0f}% tax
-                        rate on withdrawals, the model cannot reach the FI target by age {retirement_age}.
-                      </div>
-                    </div>
-                    """
+                summary_line = (
+                    f"Bridge duration: ~{barista_bridge_years:.0f} years "
+                    f"(age {barista_age} → {retirement_age})."
                 )
-                st.markdown(barista_card_html, unsafe_allow_html=True)
 
-    # Barista income series (on base path) – still for display only
-    barista_income_series = []
-    for row in df_full.itertuples():
-        age = row.Age
-        year = row.Year
-        if (
-            use_barista
-            and barista_age is not None
-            and barista_income_today > 0
-            and barista_age <= age <= barista_end_age
-        ):
-            if show_real and infl_rate > 0:
-                income = barista_income_today
-            else:
-                income = barista_income_today * ((1 + infl_rate) ** year)
-        else:
-            income = 0.0
-        barista_income_series.append(income)
-
-    df_full["BaristaIncome"] = barista_income_series
+            barista_card_html = textwrap.dedent(
+                f"""
+                <div style="background-color:#F0EFEF; padding:26px 20px; border-radius:12px;
+                            text-align:center; margin-bottom:20px; border:1px solid #CFCFCF;">
+                  <div style="font-size:20px; color:#333333; margin-bottom:4px;">
+                    Part Time Work FI Independence Age
+                  </div>
+                  <div style="font-size:64px; font-weight:700; color:#000000; line-height:1.05;">
+                    {barista_age}
+                  </div>
+                  <div style="font-size:15px; color:#444444; margin-top:12px;">
+                    {summary_line}
+                  </div>
+                </div>
+                """
+            )
+            st.markdown(barista_card_html, unsafe_allow_html=True)
+        elif use_barista:
+            barista_card_html = textwrap.dedent(
+                """
+                <div style="background-color:#F7F7F7; padding:24px 18px; border-radius:12px;
+                            text-align:center; margin-bottom:20px; border:1px solid #E0E0E0;">
+                  <div style="font-size:15px; color:#555555;">
+                    Part-time FI bridge not reachable under current assumptions.
+                  </div>
+                </div>
+                """
+            )
+            st.markdown(barista_card_html, unsafe_allow_html=True)
 
     # ---------------------------------------------------------
     # Net worth chart override: choose when you stop working
@@ -1409,12 +1090,68 @@ def main():
         else:
             monthly_contrib_by_year_chart.append(0.0)
 
-    # Re-run compound schedule for chart path using modified contributions
+    # Build expense / withdrawal schedule for chart path.
+    # Start from base housing/other expenses, then overlay FI / Barista withdrawals.
+    annual_expense_by_year_chart = annual_expense_by_year_nominal_full.copy()
+
+    # Helper: convert real (today's $) withdrawal into nominal $ in year y.
+    def _withdraw_nominal_from_real(real_amount, year_index):
+        if real_amount <= 0:
+            return 0.0
+        if infl_rate > 0:
+            return real_amount * ((1 + infl_rate) ** year_index)
+        else:
+            return real_amount
+
+    # Overlay FI withdrawals if chart is anchored to FI independence age
+    if stop_choice == "FI independence age" and fi_age is not None:
+        for y in range(years_full):
+            age = current_age + y
+            if age >= fi_age and age <= retirement_age:
+                base_real = fi_annual_spend_today + max(extra_health_today, 0.0)
+                if barista_tax_rate_bridge > 0:
+                    gross_real = base_real / (1 - barista_tax_rate_bridge)
+                else:
+                    gross_real = base_real
+                annual_expense_by_year_chart[y] += _withdraw_nominal_from_real(
+                    gross_real, y
+                )
+
+    # Overlay Barista bridge withdrawals if chart is anchored to Barista FI age
+    elif (
+        stop_choice == "Part Time Work FI Independence Age"
+        and use_barista
+        and barista_age is not None
+    ):
+        for y in range(years_full):
+            age = current_age + y
+            if age < barista_age or age > retirement_age:
+                continue
+
+            if age <= barista_end_age:
+                spend_real = max(fi_annual_spend_today - barista_income_today, 0.0)
+            else:
+                spend_real = fi_annual_spend_today
+
+            spend_real += max(extra_health_today, 0.0)
+
+            if barista_tax_rate_bridge > 0:
+                gross_real = spend_real / (1 - barista_tax_rate_bridge)
+            else:
+                gross_real = spend_real
+
+            annual_expense_by_year_chart[y] += _withdraw_nominal_from_real(
+                gross_real, y
+            )
+
+    # Traditional FI age slider uses base expenses only.
+
+    # Re-run compound schedule for chart path using modified contributions & expenses
     df_full_chart = compound_schedule(
         start_balance=start_balance_effective,
         years=years_full,
         monthly_contrib_by_year=monthly_contrib_by_year_chart,
-        annual_expense_by_year=annual_expense_by_year_nominal_full,
+        annual_expense_by_year=annual_expense_by_year_chart,
         annual_rate_by_year=annual_rates_by_year_full,
     )
 
@@ -1440,27 +1177,12 @@ def main():
             "HomePrice",
             "HomeEquity",
             "NetWorth",
+            "CumContributions",
+            "ExpenseDrag",
+            "CumulativeExpense",
+            "NetGrowth",
         ]:
             df_full_chart[col] = df_full_chart[col] / df_full_chart["DF_end"]
-
-        cum_contrib_real = 0.0
-        cum_expense_drag_real = 0.0
-        cum_expense_abs_real = 0.0
-        net_contrib_cum_real = 0.0
-
-        for idx in range(len(df_full_chart)):
-            c = df_full_chart.loc[idx, "ContribYear"]
-            e = df_full_chart.loc[idx, "AnnualExpense"]
-
-            cum_contrib_real += c
-            cum_expense_drag_real += -e
-            cum_expense_abs_real += e
-            net_contrib_cum_real = cum_contrib_real + cum_expense_drag_real
-
-            df_full_chart.loc[idx, "CumContributions"] = cum_contrib_real
-            df_full_chart.loc[idx, "ExpenseDrag"] = cum_expense_drag_real
-            df_full_chart.loc[idx, "CumulativeExpense"] = cum_expense_abs_real
-            df_full_chart.loc[idx, "NetContributions"] = net_contrib_cum_real
     else:
         df_full_chart["DF_end"] = 1.0
         df_full_chart["DF_mid"] = 1.0
@@ -1468,352 +1190,197 @@ def main():
     # Use chart path for all visualizations/tables (still clipped at traditional FI age)
     df_plot = df_full_chart[df_full_chart["Age"] <= retirement_age].reset_index(drop=True)
 
-    ending_net_worth = df_plot["NetWorth"].iloc[-1]
-    ending_invest_balance = df_plot["Balance"].iloc[-1]
-
-    # Left column: charts + tables
+    # ---------------------------------------------------------
+    # Net worth chart
+    # ---------------------------------------------------------
     with main_left:
-        st.subheader(
-            f"Net worth at traditional FI age: ${ending_net_worth:,.0f}{label_suffix}"
-        )
-        st.caption(
-            f"(Investments: ${ending_invest_balance:,.0f}; home equity included in net worth. "
-            f"Assumes full-time work stops at age {stop_work_age_for_chart}.)"
-        )
+        st.markdown("### Net worth over time" + label_suffix)
 
-        # Net worth decomposition chart
+        df_plot_chart = df_plot.copy()
+
         color_net_contrib = "#C8A77A"
         color_invest_growth = "#3A6EA5"
         color_home = "#A7ADB2"
         highlight_color = "#CCAA00"
 
-        highlight_mask = df_plot["NetWorth"] >= 1_000_000
+        highlight_mask = df_plot_chart["NetWorth"] >= 1_000_000
         if highlight_mask.any():
             first_million_index = highlight_mask.idxmax()
         else:
             first_million_index = None
 
-        net_colors = []
-        growth_colors = []
-        home_colors = []
-        for idx in df_plot.index:
-            if first_million_index is not None and idx == first_million_index:
-                net_colors.append(highlight_color)
-                growth_colors.append(highlight_color)
-                home_colors.append(highlight_color)
-            else:
-                net_colors.append(color_net_contrib)
-                growth_colors.append(color_invest_growth)
-                home_colors.append(color_home)
-
         fig = go.Figure()
+
         fig.add_trace(
             go.Bar(
-                x=df_plot["Age"],
-                y=df_plot["NetContributions"],
-                name="Net contributions (after expenses)",
-                marker_color=net_colors,
-                hovertemplate="Age %{x}<br>Net contributions: $%{y:,.0f}<extra></extra>",
+                x=df_plot_chart["Age"],
+                y=df_plot_chart["NetContributions"],
+                name="Net contributions (incl. expense drag)",
+                marker=dict(color=color_net_contrib),
+                hovertemplate="Age %{x}<br>Net Contributions: $%{y:,.0f}<extra></extra>",
             )
         )
+
         fig.add_trace(
             go.Bar(
-                x=df_plot["Age"],
-                y=df_plot["InvestGrowth"],
+                x=df_plot_chart["Age"],
+                y=df_plot_chart["InvestGrowth"],
                 name="Investment growth (cumulative)",
-                marker_color=growth_colors,
-                hovertemplate="Age %{x}<br>Investment growth: $%{y:,.0f}<extra></extra>",
+                marker=dict(color=color_invest_growth),
+                hovertemplate="Age %{x}<br>Investment Growth: $%{y:,.0f}<extra></extra>",
             )
         )
-        fig.add_trace(
-            go.Bar(
-                x=df_plot["Age"],
-                y=df_plot["HomeEquity"],
-                name="Home equity",
-                marker_color=home_colors,
-                hovertemplate="Age %{x}<br>Home equity: $%{y:,.0f}<extra></extra>",
-            )
-        )
-
-        ages = df_plot["Age"].tolist()
-        tickvals = []
-        for i, age in enumerate(ages):
-            if i == 0 or i == len(ages) - 1 or age % 5 == 0:
-                tickvals.append(age)
-        tickvals = sorted(set(tickvals))
-        ticktext = [str(a) for a in tickvals]
-
-        fig.update_layout(
-            barmode="stack",
-            height=280,
-            title=dict(
-                text="Net worth over time",
-                x=0.5,
-                xanchor="center",
-                font=dict(size=18),
-                pad=dict(b=10),
-            ),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=20, r=20, t=40, b=40),
-            xaxis=dict(
-                title=dict(text="Age (years)", font=dict(size=14)),
-                tickfont=dict(size=12, color="#777777"),
-                showgrid=False,
-                showline=True,
-                linecolor="#777777",
-                tickmode="array",
-                tickvals=tickvals,
-                ticktext=ticktext,
-            ),
-            yaxis=dict(
-                title=dict(text="Amount ($)", font=dict(size=14)),
-                tickfont=dict(size=12, color="#777777"),
-                showgrid=True,
-                gridcolor="#E0E0E0",
-                showline=True,
-                linecolor="#777777",
-                tickprefix="$",
-                tickformat=",.0f",
-                separatethousands=True,
-                exponentformat="none",
-                showexponent="none",
-            ),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=0.96,
-                xanchor="center",
-                x=0.5,
-                font=dict(size=12),
-            ),
-        )
-
-        stacked_heights = (
-            df_plot["NetContributions"] + df_plot["InvestGrowth"] + df_plot["HomeEquity"]
-        )
-        last_age = df_plot["Age"].iloc[-1]
-        last_bar_height = stacked_heights.iloc[-1]
-        max_bar_height = stacked_heights.max()
-        label_y = last_bar_height + max_bar_height * 0.03
-
-        fig.add_annotation(
-            x=last_age,
-            y=label_y,
-            text=f"<b>${ending_net_worth:,.0f}</b>",
-            showarrow=False,
-            font=dict(size=14, color="black", family="Arial"),
-        )
-
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-        # Put the two charts side by side and make them smaller
-        col_ret, col_inc = st.columns(2)
-
-        # Annual return by age chart (nominal only), line chart
-        with col_ret:
-            st.markdown("#### Annual return by age")
-
-            nominal_pct = [r * 100 for r in annual_rates_by_year_full]
-
-            age_returns_df = pd.DataFrame(
-                {
-                    "Age": df_full_chart["Age"],
-                    "Nominal": nominal_pct,
-                }
-            )
-
-            y_max_ret = max(nominal_pct)
-            y_max_ret = y_max_ret * 1.1 if y_max_ret > 0 else 1.0
-
-            fig_ret = go.Figure()
-            fig_ret.add_trace(
-                go.Scatter(
-                    x=age_returns_df["Age"],
-                    y=age_returns_df["Nominal"],
-                    mode="lines",
-                    name="Nominal return",
-                )
-            )
-
-            fig_ret.update_layout(
-                xaxis_title="Age",
-                yaxis_title="Return (%)",
-                yaxis=dict(range=[0, y_max_ret]),
-                margin=dict(l=30, r=20, t=40, b=40),
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="center",
-                    x=0.5,
-                    font=dict(size=11),
-                ),
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                height=300,
-            )
-
-            st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
-
-        # Income trajectory chart, y-axis from 0 (pre-tax income)
-        with col_inc:
-            st.markdown("#### Income trajectory")
-
-            fig_inc = go.Figure()
-            fig_inc.add_trace(
-                go.Scatter(
-                    x=df_income["Age"],
-                    y=df_income["IncomeRealBeforeTax"],
-                    mode="lines",
-                    name="Income (pre-tax)",
-                )
-            )
-            fig_inc.add_trace(
-                go.Scatter(
-                    x=df_income["Age"],
-                    y=df_income["ExpensesReal"],
-                    mode="lines",
-                    name="Expenses",
-                )
-            )
-            fig_inc.add_trace(
-                go.Scatter(
-                    x=df_income["Age"],
-                    y=df_income["InvestableRealAnnual"],
-                    mode="lines",
-                    name="Annual investable",
-                )
-            )
-
-            y_max_inc = max(
-                df_income["IncomeRealBeforeTax"].max(),
-                df_income["ExpensesReal"].max(),
-                df_income["InvestableRealAnnual"].max(),
-            )
-            y_max_inc = y_max_inc * 1.1 if y_max_inc > 0 else 1.0
-
-            fig_inc.update_layout(
-                xaxis_title="Age",
-                yaxis_title="$/year",
-                yaxis=dict(range=[0, y_max_inc], tickprefix="$"),
-                margin=dict(l=30, r=20, t=40, b=40),
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="center",
-                    x=0.5,
-                    font=dict(size=11),
-                ),
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                height=300,
-            )
-
-            st.plotly_chart(fig_inc, use_container_width=True, config={"displayModeBar": False})
-
-        # Age-by-age table (chart path)
-        st.markdown("### Age-by-age breakdown")
-
-        display_df = df_plot.copy()
-        display_df["InvestmentValue"] = display_df["Balance"]
-        display_df["Home Value"] = display_df["HomePrice"]
-        display_df["Home Equity"] = display_df["HomeEquity"]
-        display_df["Contributions"] = display_df["ContribYear"]
-        display_df["AdditionalAnnualExpense"] = display_df["AnnualExpense"]
-        display_df["Investment Growth"] = display_df["InvestGrowthYear"]
-        display_df["Net Worth"] = display_df["NetWorth"]
-
-        display_cols = [
-            "Year",
-            "Age",
-            "InvestmentValue",
-            "Home Value",
-            "Home Equity",
-            "Contributions",
-            "AdditionalAnnualExpense",
-            "Investment Growth",
-            "Net Worth",
-        ]
-
-        st.dataframe(
-            display_df[display_cols].style.format(
-                {
-                    "InvestmentValue": "${:,.0f}",
-                    "Home Value": "${:,.0f}",
-                    "Home Equity": "${:,.0f}",
-                    "Contributions": "${:,.0f}",
-                    "AdditionalAnnualExpense": "${:,.0f}",
-                    "Investment Growth": "${:,.0f}",
-                    "Net Worth": "${:,.0f}",
-                }
-            ),
-            hide_index=True,
-            use_container_width=True,
-        )
-
-        # -------- Key assumptions & notes --------
-        assumptions = []
-
-        if len(df_income) > 0:
-            first_row = df_income.iloc[0]
-            assumptions.append(
-                f"- Current income model (after income tax + FICA + state): income ≈ "
-                f"${first_row['IncomeRealAfterTax']:,.0f}/yr, expenses ≈ "
-                f"${first_row['ExpensesReal']:,.0f}/yr, investable ≈ "
-                f"${first_row['InvestableRealAnnual']:,.0f}/yr "
-                f"({first_row['SavingsRate']*100:.1f}% savings rate on after-tax income)."
-            )
-        assumptions.append(
-            f"- Pre-tax income grows at {income_growth_rate*100:.1f}%/yr; "
-            f"expenses grow at {expense_growth_rate*100:.1f}%/yr above inflation."
-        )
-
-        if use_kid_expenses:
-            assumptions.append(
-                f"- Kid expenses: ages **{kids_start_age}–{kids_end_age}**, "
-                f"{num_kids} kid(s) at `${annual_cost_per_kid_today:,.0f}`/kid/year (today's $)."
-            )
-        if use_car_expenses:
-            assumptions.append(
-                f"- Cars: `${car_cost_today:,.0f}` (today's $) starting at age **{first_car_age}** "
-                f"every **{car_interval_years}** years."
-            )
 
         if include_home:
-            if home_status == "I already own a home":
-                assumptions.append(
-                    f"- Home: currently worth `${current_home_value_today:,.0f}`, "
-                    f"current equity `${equity_amount_now:,.0f}`, "
-                    f"{years_remaining_loan} years remaining at **{mortgage_rate*100:.2f}%**."
+            fig.add_trace(
+                go.Bar(
+                    x=df_plot_chart["Age"],
+                    y=df_plot_chart["HomeEquity"],
+                    name="Home equity",
+                    marker=dict(color=color_home),
+                    hovertemplate="Age %{x}<br>Home Equity: $%{y:,.0f}<extra></extra>",
                 )
-            else:
-                assumptions.append(
-                    f"- Home: purchase at age **{planned_purchase_age}**, today's price `${home_price_today:,.0f}`, "
-                    f"down `{down_payment_pct*100:.1f}%`, {mortgage_rate*100:.2f}% mortgage over {mortgage_term_years} years, "
-                    f"{home_app_rate*100:.1f}%/yr appreciation, {maintenance_pct*100:.1f}% maintenance."
-                )
-                assumptions.append(
-                    f"- After purchase: housing cost uses mortgage payment + estimated property tax/insurance "
-                    f"of `${est_prop_tax_monthly*12:,.0f}`/yr compared with current rent `${current_rent:,.0f}`/month. "
-                    "The difference is modeled as additional annual housing expense."
-                )
-
-        if show_real and infl_rate > 0:
-            assumptions.append(
-                f"- All values shown in today's dollars using **{infl_rate*100:.1f}%** inflation."
             )
 
-        assumptions.append(
-            "- FI age is the earliest age you can stop full-time work, have the portfolio fund "
-            "your target FI spending (plus extra health costs if entered) until the traditional FI age, "
-            "and still meet the 4% rule target at that age. Home equity is excluded from FI math."
+        if first_million_index is not None:
+            age_million = df_plot_chart.loc[first_million_index, "Age"]
+            networth_million = df_plot_chart.loc[first_million_index, "NetWorth"]
+
+            fig.add_trace(
+                go.Scatter(
+                    x=[age_million],
+                    y=[networth_million],
+                    mode="markers+text",
+                    marker=dict(size=12, symbol="circle"),
+                    text=["$1M+"],
+                    textposition="top center",
+                    name="First $1M",
+                    hovertemplate="First $1M at age %{x}<extra></extra>",
+                )
+            )
+
+        fig.update_layout(
+            barmode="relative",
+            xaxis_title="Age",
+            yaxis_title="Net worth" + label_suffix,
+            showlegend=True,
+            hovermode="x unified",
+            margin=dict(l=40, r=30, t=40, b=40),
         )
-        assumptions.append(
-            f"- Net worth chart contributions stop at age {stop_work_age_for_chart}; "
-            "no further contributions are made after that age in the chart path."
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # Income trajectory + returns line charts
+    # ---------------------------------------------------------
+    with main_left:
+        st.markdown("### Income and expected return by age")
+
+        df_income_plot = df_income.copy()
+        df_income_plot["Age"] = current_age + df_income_plot["YearIndex"]
+
+        df_returns_plot = pd.DataFrame(
+            {
+                "Age": ages,
+                "AnnualReturn": [r * 100 for r in annual_rates_by_year_full],
+            }
         )
+
+        fig_income = go.Figure()
+        fig_income.add_trace(
+            go.Scatter(
+                x=df_income_plot["Age"],
+                y=df_income_plot["IncomeNominal"],
+                mode="lines",
+                name="Pre-tax income (nominal)",
+                hovertemplate="Age %{x}<br>Income: $%{y:,.0f}<extra></extra>",
+            )
+        )
+
+        fig_income.update_layout(
+            xaxis_title="Age",
+            yaxis_title="Income ($/year, nominal)",
+            hovermode="x unified",
+            showlegend=True,
+            margin=dict(l=40, r=30, t=40, b=40),
+        )
+
+        st.plotly_chart(fig_income, use_container_width=True)
+
+        fig_returns = go.Figure()
+        fig_returns.add_trace(
+            go.Scatter(
+                x=df_returns_plot["Age"],
+                y=df_returns_plot["AnnualReturn"],
+                mode="lines",
+                name="Annual return (nominal, glide path)",
+                hovertemplate="Age %{x}<br>Return: %{y:.2f}%<extra></extra>",
+            )
+        )
+
+        fig_returns.update_layout(
+            xaxis_title="Age",
+            yaxis_title="Expected annual return (%)",
+            hovermode="x unified",
+            showlegend=True,
+            margin=dict(l=40, r=30, t=40, b=40),
+        )
+
+        st.plotly_chart(fig_returns, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # Additional table to vet model
+    # ---------------------------------------------------------
+    with main_left:
+        st.markdown("### Detailed projection table (chart path)")
+
+        df_table = df_plot[
+            [
+                "Age",
+                "Balance",
+                "HomeEquity",
+                "NetWorth",
+                "CumContributions",
+                "InvestGrowth",
+                "ExpenseDrag",
+                "CumulativeExpense",
+                "AnnualExpense",
+            ]
+        ].copy()
+
+        df_table.columns = [
+            "Age",
+            "Portfolio",
+            "Home equity",
+            "Net worth",
+            "Cumulative contributions",
+            "Investment growth (cum)",
+            "Expense drag (cum)",
+            "Cumulative expenses",
+            "Annual expenses (incl. FI / Barista withdrawals)",
+        ]
+
+        st.dataframe(df_table.style.format("{:,.0f}", subset=df_table.columns[1:]))
+
+    # ---------------------------------------------------------
+    # Key assumptions text
+    # ---------------------------------------------------------
+    with main_left:
+        st.markdown("### Key assumptions")
+
+        assumptions = []
+
+        assumptions.append(
+            f"- FI target is always set as FI spending / base SWR at the traditional FI age "
+            f"({retirement_age}), in today's dollars."
+        )
+
+        if fi_age is not None:
+            assumptions.append(
+                f"- FI independence age {fi_age}: Model assumes you stop full-time work at this age, "
+                f"set new contributions to $0, and withdraw FI spending + extra health (grossed up for "
+                f"the specified withdrawal tax rate) each year until traditional FI age {retirement_age}."
+            )
 
         if use_barista and barista_age is not None:
             assumptions.append(
