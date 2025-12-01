@@ -1424,52 +1424,35 @@ def main():
 
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-        # Put the two line charts side by side and make them smaller
+        # Put the two charts side by side and make them smaller
         col_ret, col_inc = st.columns(2)
 
-        # Annual return by age chart (nominal + real), y-axis from 0
+        # Annual return by age chart (nominal only), bar chart, y-axis from 0
         with col_ret:
-            st.markdown("###### Annual return by age")
+            st.markdown("#### Annual return by age")
 
             nominal_pct = [r * 100 for r in annual_rates_by_year_full]
-            if infl_rate > 0:
-                real_pct = [
-                    ((1 + r) / (1 + infl_rate) - 1) * 100 for r in annual_rates_by_year_full
-                ]
-            else:
-                real_pct = nominal_pct.copy()
 
             age_returns_df = pd.DataFrame(
                 {
                     "Age": df_full["Age"],
                     "Nominal": nominal_pct,
-                    "Real": real_pct,
                 }
             )
 
-            y_max_ret = max(max(nominal_pct), max(real_pct))
+            y_max_ret = max(nominal_pct)
             y_max_ret = y_max_ret * 1.1 if y_max_ret > 0 else 1.0
 
             fig_ret = go.Figure()
             fig_ret.add_trace(
-                go.Scatter(
+                go.Bar(
                     x=age_returns_df["Age"],
                     y=age_returns_df["Nominal"],
-                    mode="lines",
                     name="Nominal return",
-                )
-            )
-            fig_ret.add_trace(
-                go.Scatter(
-                    x=age_returns_df["Age"],
-                    y=age_returns_df["Real"],
-                    mode="lines",
-                    name="Real return (net of inflation)",
                 )
             )
 
             fig_ret.update_layout(
-              
                 xaxis_title="Age",
                 yaxis_title="Return (%)",
                 yaxis=dict(range=[0, y_max_ret]),
@@ -1489,17 +1472,17 @@ def main():
 
             st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
 
-        # Income trajectory chart, y-axis from 0
+        # Income trajectory chart, y-axis from 0 (now pre-tax income)
         with col_inc:
-            st.markdown("###### Income trajectory")
+            st.markdown("#### Income trajectory")
 
             fig_inc = go.Figure()
             fig_inc.add_trace(
                 go.Scatter(
                     x=df_income["Age"],
-                    y=df_income["IncomeRealAfterTax"],
+                    y=df_income["IncomeRealBeforeTax"],
                     mode="lines",
-                    name="Income (after tax)",
+                    name="Income (pre-tax)",
                 )
             )
             fig_inc.add_trace(
@@ -1520,14 +1503,13 @@ def main():
             )
 
             y_max_inc = max(
-                df_income["IncomeRealAfterTax"].max(),
+                df_income["IncomeRealBeforeTax"].max(),
                 df_income["ExpensesReal"].max(),
                 df_income["InvestableRealAnnual"].max(),
             )
             y_max_inc = y_max_inc * 1.1 if y_max_inc > 0 else 1.0
 
             fig_inc.update_layout(
-             
                 xaxis_title="Age",
                 yaxis_title="$/year",
                 yaxis=dict(range=[0, y_max_inc], tickprefix="$"),
@@ -1663,12 +1645,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
