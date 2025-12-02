@@ -799,8 +799,8 @@ def main():
             df_chart[c] /= df_chart["DF"]
 
     # 5. Plot
-    plot_end = retirement_age + 5
-    if is_early: plot_end = max(retirement_age, fi_age_regular) + 5
+    plot_end = retirement_age
+    # If using custom stop logic (like is_early), we cap at retirement_age to avoid overshoot unless early is actually later (unlikely)
     
     df_p = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
     
@@ -836,6 +836,25 @@ def main():
             marker=dict(color="#D32F2F", size=15, symbol="circle"),
             showlegend=False
         ))
+    
+    # Final Number Annotation
+    if not df_p.empty:
+        final_row = df_p.iloc[-1]
+        fig.add_annotation(
+            x=final_row["Age"],
+            y=final_row["NetWorth"],
+            text=f"<b>${final_row['NetWorth']:,.0f}</b>",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=2,
+            ax=0,
+            ay=-40,
+            font=dict(size=16, color="black"),
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="black",
+            borderwidth=1
+        )
     
     # Target Line
     target_val = fi_target_bal
@@ -904,6 +923,24 @@ def main():
             fig_r.add_trace(go.Scatter(x=df_p["Age"], y=pcts[:len(df_p)], mode='lines', name="Return %", hovertemplate="%{y:.1f}%"))
             fig_r.update_layout(height=250, margin=dict(t=20, b=20, l=20, r=20), yaxis_title="% Return", yaxis=dict(tickformat=".1f"))
             st.plotly_chart(fig_r, use_container_width=True)
+
+        st.markdown("**Savings Rate Over Time**")
+        fig_s = go.Figure()
+        fig_s.add_trace(go.Scatter(
+            x=df_income["Age"], 
+            y=df_income["SavingsRate"] * 100, # Convert to % for display if stored as decimal
+            mode='lines', 
+            name="Savings Rate", 
+            line=dict(color="#42A5F5"),
+            hovertemplate="%{y:.1f}%"
+        ))
+        fig_s.update_layout(
+            height=250, 
+            margin=dict(t=20, b=20, l=20, r=20), 
+            yaxis_title="Savings Rate (%)",
+            yaxis=dict(tickformat=".1f")
+        )
+        st.plotly_chart(fig_s, use_container_width=True)
 
     with tab3:
         st.write("Detailed yearly breakdown.")
