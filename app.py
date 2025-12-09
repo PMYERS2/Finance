@@ -428,6 +428,9 @@ def main():
 
     st.title("Financial Independence Planner")
     
+    # Container for Verdict Cards (so they can be populated after we define dashboard controls below)
+    kpi_container = st.container()
+    
     # --- SIDEBAR: Grouped & Organized ---
     with st.sidebar.expander("1. Profile & Current State", expanded=True):
         current_age = st.number_input("Current Age", 20, 100, 30)
@@ -510,7 +513,7 @@ def main():
         state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
         expense_growth_rate = st.number_input("Expense Growth > Inflation (%)", 0.0, 10.0, 0.0, 0.5) / 100.0
         savings_rate_override = st.slider("Force Savings Rate (%)", 0.0, 1.0, 0.0, 0.05)
-        show_real = st.checkbox("Show Real Dollars (Adjusted for Inflation)", True)
+        # Removed show_real from sidebar, moved to main dashboard area below
         
         st.markdown("---")
         st.markdown("**Early Withdrawal Taxes**")
@@ -538,6 +541,18 @@ def main():
             car_interval_years = c1.number_input("Replace Every (Yrs)", value=8)
         else:
             car_cost_today, first_car_age, car_interval_years = 0,0,0
+
+    # --- DASHBOARD LAYOUT START ---
+    st.markdown("---")
+    sim_col, _ = st.columns([1, 2])
+    
+    # Define Controls that affect calculation/display (BEFORE calculation logic)
+    with sim_col:
+        c_check1, c_check2 = st.columns(2)
+        with c_check1:
+            show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
+        with c_check2:
+            use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
 
     # --- CALCULATION ENGINE ---
     # (Same logic as before, just processing the data)
@@ -669,9 +684,9 @@ def main():
         early_withdrawal_tax_rate
     )
 
-    # --- TOP ROW: THE VERDICT ---
+    # --- TOP ROW: THE VERDICT (Populate Container) ---
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = kpi_container.columns(3)
     
     def render_card(col, title, age, desc):
         color = "#0D47A1" if age else "#CC0000"
@@ -689,14 +704,11 @@ def main():
     render_card(col2, "Barista FIRE", barista_age, f"Switch to a ${barista_income_today/1000:.0f}k job. Portfolio covers the gap.")
     render_card(col3, "Coast FIRE", coast_age, f"Stop saving now. Work to cover expenses only.")
 
-    st.markdown("---")
-
-    # --- MAIN VISUALIZATION ---
+    # --- MAIN VISUALIZATION CONTROLS ---
     
-    # 1. Controller
-    sim_col, _ = st.columns([1, 2])
+    # 1. Controller (Resume filling sim_col)
     with sim_col:
-        # Custom Early Retirement Slider (Placed here for dashboard interactivity)
+        # Custom Early Retirement Slider
         default_exit = fi_age_regular if fi_age_regular else 55
         custom_exit_age = st.slider("Select Custom Early Retirement Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
         
@@ -719,7 +731,10 @@ def main():
         is_barista = True
     elif "Custom" in scenario:
         stop_age = custom_exit_age
-        is_early = True
+        if use_barista_mode:
+            is_barista = True
+        else:
+            is_early = True
 
     # 3. Build Chart Data
     monthly_contrib_chart = []
