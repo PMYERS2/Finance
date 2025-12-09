@@ -32,6 +32,7 @@ def compound_schedule(
         m = 12
         balance_start_year = balance
         contrib_year = 0.0
+        growth_year_sum = 0.0
 
         # Monthly Compounding Loop
         for _ in range(m):
@@ -42,6 +43,7 @@ def compound_schedule(
 
             growth_month = balance * (r / m)
             balance += growth_month
+            growth_year_sum += growth_month
 
         balance_before_expense = balance
         annual_expense = annual_expense_by_year[year_idx]
@@ -60,7 +62,8 @@ def compound_schedule(
                 "CumContributions": cum_contrib,
                 "ContribYear": contrib_year,
                 "InvestGrowth": net_growth_cum,
-                "InvestGrowthYear": 0.0, 
+                "InvestGrowthYear": growth_year_sum, 
+                "AnnualRate": r,
                 "ExpenseDrag": 0.0,      
                 "NetGrowth": net_growth_cum,
                 "AnnualExpense": annual_expense,
@@ -693,10 +696,14 @@ def main():
     # 1. Controller
     sim_col, _ = st.columns([1, 2])
     with sim_col:
-        stop_options = ["Work until Traditional Age"]
+        # Custom Early Retirement Slider (Placed here for dashboard interactivity)
+        default_exit = fi_age_regular if fi_age_regular else 55
+        custom_exit_age = st.slider("Select Custom Early Retirement Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
+        
+        stop_options = ["Work until Full Retirement"]
         if coast_age: stop_options.append(f"Coast FIRE (Age {coast_age})")
         if barista_age: stop_options.append(f"Barista FIRE (Age {barista_age})")
-        if fi_age_regular: stop_options.append(f"Retire Early (Age {fi_age_regular})")
+        stop_options.append(f"Custom Early Retirement (Age {custom_exit_age})")
         
         scenario = st.selectbox(" Visualize Scenario:", stop_options)
 
@@ -710,8 +717,8 @@ def main():
     elif "Barista" in scenario:
         stop_age = barista_age
         is_barista = True
-    elif "Retire Early" in scenario:
-        stop_age = fi_age_regular
+    elif "Custom" in scenario:
+        stop_age = custom_exit_age
         is_early = True
 
     # 3. Build Chart Data
@@ -845,7 +852,7 @@ def main():
         for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense"]:
             df_chart[c] /= df_chart["DF"]
         # Breakdown Cols
-        for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost"]:
+        for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear"]:
             df_chart[c] /= df_chart["DF"]
 
     # 5. Plot
@@ -1020,12 +1027,16 @@ def main():
             "HomeCost": "${:,.0f}",
             "TotalPortfolioDraw": "${:,.0f}",
             "ScenarioActiveIncome": "${:,.0f}",
+            "InvestGrowthYear": "${:,.0f}",
+            "AnnualRate": "{:.2%}",
             "Age": "{:.0f}"
         }
         
         # Filter to relevant columns
         cols = [
             "Age", 
+            "AnnualRate",
+            "InvestGrowthYear",
             "LivingWithdrawal", 
             "TaxPenalty", 
             "KidCost", 
