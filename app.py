@@ -427,7 +427,7 @@ def main():
     
     # --- SIDEBAR: Grouped & Organized ---
     with st.sidebar.expander("1. Profile & Current State", expanded=True):
-        current_age = st.number_input("Current Age", 26, 100, 26)
+        current_age = st.number_input("Current Age", 20, 100, 30)
         start_income = st.number_input("Pre-tax Income ($)", 0, 1000000, 90000, step=5000)
         expense_today = st.number_input("Current Expenses ($/yr)", 0, 500000, 36000, step=1000)
     
@@ -438,10 +438,10 @@ def main():
         c1, c2 = st.columns(2)
         with c1:
             # FIX: Use max() to ensure the default value never falls below the dynamic min_value (current_age + 1)
-            p1_default = max(30, current_age + 1)
+            p1_default = max(35, current_age + 1)
             p1_age = st.number_input("Event 1 Age", current_age+1, 90, p1_default)
             
-            p2_default = max(35, current_age + 1)
+            p2_default = max(40, current_age + 1)
             p2_age = st.number_input("Event 2 Age", current_age+1, 90, p2_default)
         with c2:
             p1_pct = st.number_input("Event 1 % Change", -100.0, 500.0, 0.0, step=5.0) / 100.0
@@ -474,7 +474,7 @@ def main():
                 mp = (loan * (mortgage_rate/12) / (1 - (1+mortgage_rate/12)**(-np))) if mortgage_rate > 0 else loan/np
             else:
                 home_price_today = st.number_input("Target Price ($)", value=250000)
-                planned_purchase_age = st.number_input("Buy Age", value=current_age, min_value=current_age)
+                planned_purchase_age = st.number_input("Buy Age", value=current_age+2, min_value=current_age)
                 down_payment_pct = st.number_input("Down Payment %", value=20.0) / 100.0
                 mortgage_rate = st.number_input("Rate (%)", value=5.8) / 100.0
                 mortgage_term_years = st.number_input("Term (Years)", value=15)
@@ -561,6 +561,12 @@ def main():
 
     # Base Expenses (Kids, Cars, Housing)
     annual_expense_by_year_nominal_full = [0.0] * years_full
+    
+    # NEW: Tracking specific expense buckets for the detailed chart
+    exp_kids_nominal = [0.0] * years_full
+    exp_cars_nominal = [0.0] * years_full
+    exp_housing_nominal = [0.0] * years_full
+
     home_price_by_year_full = [0.0] * years_full
     home_equity_by_year_full = [0.0] * years_full
     housing_adj_by_year_full = [0.0] * years_full
@@ -580,10 +586,14 @@ def main():
                     total_kids_cost_now += annual_cost_per_kid_today
             
             if total_kids_cost_now > 0:
-                annual_expense_by_year_nominal_full[y] += total_kids_cost_now * ((1+infl_rate)**(y+1))
+                cost_nom = total_kids_cost_now * ((1+infl_rate)**(y+1))
+                annual_expense_by_year_nominal_full[y] += cost_nom
+                exp_kids_nominal[y] += cost_nom
 
         if use_car and (age >= first_car_age) and (age - first_car_age) % car_interval_years == 0:
-            annual_expense_by_year_nominal_full[y] += car_cost_today * ((1+infl_rate)**(y+1))
+            cost_nom = car_cost_today * ((1+infl_rate)**(y+1))
+            annual_expense_by_year_nominal_full[y] += cost_nom
+            exp_cars_nominal[y] += cost_nom
 
     # Home Logic Execution
     if include_home:
@@ -594,7 +604,9 @@ def main():
                 start_balance_effective = max(0.0, start_balance_effective - (purch_price * down_payment_pct))
             else:
                 if purchase_idx < years_full:
-                    annual_expense_by_year_nominal_full[purchase_idx] += (purch_price * down_payment_pct)
+                    cost_nom = (purch_price * down_payment_pct)
+                    annual_expense_by_year_nominal_full[purchase_idx] += cost_nom
+                    exp_housing_nominal[purchase_idx] += cost_nom
             
             if mp > 0:
                 housing_delta = (mp + est_prop_tax_monthly - current_rent) * 12
@@ -619,11 +631,15 @@ def main():
                     equity = max(price_nom - outstanding, 0.0)
             home_equity_by_year_full[y] = equity
             
+            # Maintenance
             if y >= purchase_idx:
-                annual_expense_by_year_nominal_full[y] += price_nom * maintenance_pct
+                maint_cost = price_nom * maintenance_pct
+                annual_expense_by_year_nominal_full[y] += maint_cost
+                exp_housing_nominal[y] += maint_cost
 
     for y in range(years_full):
         annual_expense_by_year_nominal_full[y] += housing_adj_by_year_full[y]
+        exp_housing_nominal[y] += housing_adj_by_year_full[y]
 
     # Full Simulation (Baseline)
     df_full = compound_schedule(
@@ -700,12 +716,22 @@ def main():
 
     # 3. Build Chart Data
     monthly_contrib_chart = []
-    annual_expense_chart = list(annual_expense_by_year_nominal_full) # Copy
+    
+    # We will rebuild the expense chart based on specific scenario logic
+    # Start with the fixed expenses (Kids, Cars, Housing) calculated earlier
+    annual_expense_chart = list(annual_expense_by_year_nominal_full) # Initializes with Kids/Cars/Housing
     
     # Data collectors for Detailed Table (Tab 4)
     detailed_income_active = []
     detailed_expense_total = []
-    detailed_portfolio_draw = []
+    
+    # Breakdown columns
+    det_living_withdrawal = []
+    det_tax_penalty = []
+    det_kids = []
+    det_cars = []
+    det_housing = []
+    det_total_portfolio_draw = []
 
     def to_nom(val, y_idx):
         return val * ((1+infl_rate)**(y_idx+1)) if (show_real and infl_rate > 0) else val
@@ -720,7 +746,7 @@ def main():
         
         # Initialize Detailed metrics for this year
         active_income_this_year = 0.0
-        base_spend_need = 0.0
+        base_need = 0.0
         
         # 2. Retirement Phase Expenses
         if age >= stop_age:
@@ -748,35 +774,51 @@ def main():
                  if age < retirement_age: base_need = 0.0
                  else: base_need = fi_annual_spend_today * ((1+infl_rate)**(y+1))
 
-            # Net portfolio draw needed
+            # Net draw needed (Base Need)
             net_draw = base_need
             
             # Early Withdrawal Tax Gross-up (If needed)
+            gross_withdrawal = net_draw
+            tax_penalty_amount = 0.0
+            
             if net_draw > 0:
                 if age < 60 and early_withdrawal_tax_rate > 0:
                     gross_withdrawal = net_draw / (1.0 - early_withdrawal_tax_rate)
-                else:
-                    gross_withdrawal = net_draw
-            else:
-                gross_withdrawal = net_draw 
+                    tax_penalty_amount = gross_withdrawal - net_draw
             
             # Apply to chart array (Additive to existing one-time expenses like cars/homes)
+            # annual_expense_chart[y] already contains Kids + Cars + Housing from initialization
             annual_expense_chart[y] += gross_withdrawal
             
-            detailed_portfolio_draw.append(gross_withdrawal)
             # Total expense for table is what you actually spent + taxes, roughly approximated by draw + active income
-            # Or simplified: The Portfolio Draw + The Active Income used for spending
             detailed_expense_total.append(gross_withdrawal + to_nom(active_income_this_year, y))
             detailed_income_active.append(to_nom(active_income_this_year, y))
+            
+            # Store breakdown
+            det_living_withdrawal.append(net_draw)
+            det_tax_penalty.append(tax_penalty_amount)
+            # Total draw = Housing + Kids + Cars + Living + Tax
+            # Housing/Kids/Cars are in the pre-filled annual_expense_chart but we have them in separate lists too
+            # Wait, annual_expense_chart[y] WAS initialized with exp_kids + exp_cars + exp_housing.
+            # We just added gross_withdrawal (which is Living + Tax).
+            # So annual_expense_chart[y] IS the total portfolio draw.
+            det_total_portfolio_draw.append(annual_expense_chart[y])
 
         else:
             # Working Phase
             # In working phase, expense is handled implicitly by savings rate in 'df_income' 
             # But 'annual_expense_chart' tracks EXTRA expenses (kids/homes).
             # We'll just log 0 for portfolio draw in accumulation phase
-            detailed_portfolio_draw.append(0.0)
-            detailed_income_active.append(0.0) # We could pull from df_income but simpler to leave 0 for "Retirement Table" focus
-            detailed_expense_total.append(annual_expense_chart[y]) # Just the extra expenses
+            det_total_portfolio_draw.append(annual_expense_chart[y]) # Just the extra expenses
+            detailed_income_active.append(0.0) 
+            detailed_expense_total.append(annual_expense_chart[y])
+            det_living_withdrawal.append(0.0)
+            det_tax_penalty.append(0.0)
+
+        # Append specific expenses
+        det_kids.append(exp_kids_nominal[y])
+        det_cars.append(exp_cars_nominal[y])
+        det_housing.append(exp_housing_nominal[y])
 
     # 4. Generate Chart DF
     df_chart = compound_schedule(
@@ -789,13 +831,21 @@ def main():
     
     # Append detailed columns for Tab 4 (Nominal at this stage)
     df_chart["ScenarioActiveIncome"] = detailed_income_active
-    df_chart["ScenarioPortfolioDraw"] = detailed_portfolio_draw
-    # Note: AnnualExpense in df_chart is the total deduction.
+    df_chart["TotalPortfolioDraw"] = det_total_portfolio_draw
+    df_chart["LivingWithdrawal"] = det_living_withdrawal
+    df_chart["TaxPenalty"] = det_tax_penalty
+    df_chart["KidCost"] = det_kids
+    df_chart["CarCost"] = det_cars
+    df_chart["HomeCost"] = det_housing
 
     # Real Adjustment
     if show_real and infl_rate > 0:
         df_chart["DF"] = (1+infl_rate)**df_chart["Year"]
-        for c in ["Balance", "HomeEquity", "NetWorth", "ScenarioActiveIncome", "ScenarioPortfolioDraw", "AnnualExpense"]:
+        # Standard Cols
+        for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense"]:
+            df_chart[c] /= df_chart["DF"]
+        # Breakdown Cols
+        for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost"]:
             df_chart[c] /= df_chart["DF"]
 
     # 5. Plot
@@ -819,8 +869,6 @@ def main():
         marker_color='rgba(167, 173, 178, 0.5)', # Grey
         hovertemplate="$%{y:,.0f}"
     ))
-    
-    # Removed the Total Net Worth Line as requested
     
     # Add Millionaire Milestone Dot
     milestone = df_p[df_p["NetWorth"] >= 1000000]
@@ -959,20 +1007,34 @@ def main():
         
     with tab4:
         st.markdown("**Scenario Detail: " + scenario + "**")
-        st.caption("Breakdown of Portfolio Draws, Active Income (Barista/Coast), and Portfolio Value.")
+        st.caption("Breakdown of withdrawals. 'LivingWithdrawal' matches your Retirement Spend input. 'TotalPortfolioDraw' includes taxes and one-time costs.")
         
         # Prepare table data
         format_dict_d = {
             "Balance": "${:,.0f}",
             "NetWorth": "${:,.0f}",
+            "LivingWithdrawal": "${:,.0f}",
+            "TaxPenalty": "${:,.0f}",
+            "KidCost": "${:,.0f}",
+            "CarCost": "${:,.0f}",
+            "HomeCost": "${:,.0f}",
+            "TotalPortfolioDraw": "${:,.0f}",
             "ScenarioActiveIncome": "${:,.0f}",
-            "ScenarioPortfolioDraw": "${:,.0f}",
-            "AnnualExpense": "${:,.0f}", # Total Draw needed
             "Age": "{:.0f}"
         }
         
         # Filter to relevant columns
-        cols = ["Age", "Balance", "NetWorth", "ScenarioActiveIncome", "ScenarioPortfolioDraw"]
+        cols = [
+            "Age", 
+            "LivingWithdrawal", 
+            "TaxPenalty", 
+            "KidCost", 
+            "CarCost", 
+            "HomeCost",
+            "TotalPortfolioDraw",
+            "ScenarioActiveIncome",
+            "Balance"
+        ]
         
         st.dataframe(
             df_p[cols].style.format(format_dict_d),
