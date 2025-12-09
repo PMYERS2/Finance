@@ -712,29 +712,50 @@ def main():
         default_exit = fi_age_regular if fi_age_regular else 55
         custom_exit_age = st.slider("Select Custom Early Retirement Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
         
-        stop_options = ["Work until Full Retirement"]
-        if coast_age: stop_options.append(f"Coast FIRE (Age {coast_age})")
-        if barista_age: stop_options.append(f"Barista FIRE (Age {barista_age})")
-        stop_options.append(f"Custom Early Retirement (Age {custom_exit_age})")
+        # --- FIXED: Stable Selectbox Logic ---
+        # We track the KEY (e.g. "Coast") rather than the descriptive string (e.g. "Coast FIRE (Age 45)")
+        # This prevents the selection from resetting when the calculated age changes due to expense updates.
         
-        scenario = st.selectbox(" Visualize Scenario:", stop_options)
+        scenario_keys = ["Work"]
+        display_map = {"Work": "Work until Full Retirement"}
+        
+        if coast_age:
+            scenario_keys.append("Coast")
+            display_map["Coast"] = f"Coast FIRE (Age {coast_age})"
+            
+        if barista_age:
+            scenario_keys.append("Barista")
+            display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
+            
+        scenario_keys.append("Custom")
+        display_map["Custom"] = f"Custom Early Retirement (Age {custom_exit_age})"
+        
+        selected_key = st.selectbox(
+            "Visualize Scenario:", 
+            options=scenario_keys, 
+            format_func=lambda x: display_map[x]
+        )
 
     # 2. Logic for Scenario
     stop_age = retirement_age # Default
     is_coast, is_barista, is_early = False, False, False
     
-    if "Coast" in scenario:
+    # Logic updated to match keys
+    if selected_key == "Coast":
         stop_age = coast_age
         is_coast = True
-    elif "Barista" in scenario:
+    elif selected_key == "Barista":
         stop_age = barista_age
         is_barista = True
-    elif "Custom" in scenario:
+    elif selected_key == "Custom":
         stop_age = custom_exit_age
         if use_barista_mode:
             is_barista = True
         else:
             is_early = True
+            
+    # Update Label for Charts
+    scenario_label = display_map[selected_key]
 
     # 3. Build Chart Data
     monthly_contrib_chart = []
@@ -1028,7 +1049,7 @@ def main():
         )
         
     with tab4:
-        st.markdown("**Scenario Detail: " + scenario + "**")
+        st.markdown("**Scenario Detail: " + scenario_label + "**")
         st.caption("Breakdown of withdrawals. 'LivingWithdrawal' matches your Retirement Spend input. 'TotalPortfolioDraw' includes taxes and one-time costs.")
         
         # Prepare table data
