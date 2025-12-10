@@ -403,6 +403,7 @@ def main():
         padding: 10px 15px;
         text-align: center;
         margin-bottom: 10px;
+        height: 100%;
     }
     .kpi-title {
         font-size: 13px;
@@ -412,16 +413,28 @@ def main():
         margin-bottom: 2px;
     }
     .kpi-value {
-        font-size: 28px;
+        font-size: 26px;
         font-weight: 700;
         color: #212529;
         margin: 0;
         line-height: 1.2;
     }
     .kpi-subtitle {
-        font-size: 13px;
+        font-size: 12px;
         color: #495057;
-        margin-top: 2px;
+        margin-top: 5px;
+        line-height: 1.4;
+    }
+    .kpi-highlight {
+        color: #0D47A1;
+    }
+    .section-header {
+        font-size: 18px;
+        font-weight: 600;
+        margin-top: 10px;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid #f0f0f0;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -501,7 +514,7 @@ def main():
     with st.sidebar.expander("3. Future Goals", expanded=True):
         # FIX: Dynamic default for retirement age to prevent error if current_age >= 60
         ret_default = max(60, current_age + 1)
-        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default)
+        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
         
         fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
         barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
@@ -684,25 +697,81 @@ def main():
         early_withdrawal_tax_rate
     )
 
+    # --- EXTRA KPI: TRADITIONAL RETIREMENT OUTCOME ---
+    # Find the row for 'retirement_age' to see what the pot looks like if you just keep working
+    traditional_row = df_full[df_full["Age"] == retirement_age]
+    traditional_balance_display = 0.0
+    traditional_annual_income = 0.0
+    
+    if not traditional_row.empty:
+        # Get nominal balance
+        bal_nom = traditional_row.iloc[0]["Balance"]
+        
+        # Deflate if necessary
+        if show_real and infl_rate > 0:
+            years_passed = retirement_age - current_age
+            infl_factor = (1 + infl_rate) ** years_passed
+            traditional_balance_display = bal_nom / infl_factor
+        else:
+            traditional_balance_display = bal_nom
+            
+        # Calculate Safe annual income from that pot
+        traditional_annual_income = traditional_balance_display * base_swr_30yr
+
+
     # --- TOP ROW: THE VERDICT (Populate Container) ---
     
-    col1, col2, col3 = kpi_container.columns(3)
-    
-    def render_card(col, title, age, desc):
-        color = "#0D47A1" if age else "#CC0000"
-        display_age = age if age else "N/A"
+    def render_card(col, title, value, desc, sub_value=None):
+        sub_html = f"<div style='font-size:14px; font-weight:600; color:#2E7D32; margin-top:4px;'>{sub_value}</div>" if sub_value else ""
+        
         with col:
             st.markdown(f"""
             <div class="kpi-card">
                 <div class="kpi-title">{title}</div>
-                <div class="kpi-value" style="color: {color};">{display_age}</div>
-                <div class="kpi-subtitle">{desc}</div>
+                <div class="kpi-value">{value}</div>
+                {sub_html}
+                <div class="kpi-subtitle">{textwrap.shorten(desc, width=120, placeholder="...")}</div>
             </div>
             """, unsafe_allow_html=True)
 
-    render_card(col1, "Regular FIRE", fi_age_regular, f"Quit completely. Target: ${fi_target_bal:,.0f} by {retirement_age}.")
-    render_card(col2, "Barista FIRE", barista_age, f"Switch to a ${barista_income_today/1000:.0f}k job. Portfolio covers the gap.")
-    render_card(col3, "Coast FIRE", coast_age, f"Stop saving now. Work to cover expenses only.")
+    with kpi_container:
+        # SECTION 1: EARLY RETIREMENT MILESTONES
+        st.markdown('<div class="section-header">1. Early Retirement Milestones</div>', unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        
+        val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
+        color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
+        render_card(col1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", f"Quit completely. Target: ${fi_target_bal:,.0f}.")
+
+        val_bar = str(barista_age) if barista_age else "N/A"
+        color_bar = "#0D47A1" if barista_age else "#CC0000"
+        render_card(col2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", f"Switch to ${barista_income_today/1000:.0f}k job.")
+        
+        val_cst = str(coast_age) if coast_age else "N/A"
+        color_cst = "#0D47A1" if coast_age else "#CC0000"
+        render_card(col3, "Coast FIRE Age", f"<span style='color:{color_cst}'>{val_cst}</span>", f"Stop saving. Work to cover expenses only.")
+
+        # SECTION 2: TRADITIONAL PATH
+        st.markdown(f'<div class="section-header">2. Traditional Path (Working until Age {retirement_age})</div>', unsafe_allow_html=True)
+        t_col1, t_col2 = st.columns(2)
+        
+        # Card 1: The Pot
+        render_card(
+            t_col1, 
+            f"Total Nest Egg at Age {retirement_age}", 
+            f"${traditional_balance_display:,.0f}", 
+            "Projected portfolio balance if you continue working and contributing until full retirement age."
+        )
+        
+        # Card 2: The Income
+        render_card(
+            t_col2, 
+            f"Potential Annual Income", 
+            f"${traditional_annual_income:,.0f} / yr", 
+            f"Based on a {base_swr_30yr*100:.1f}% Safe Withdrawal Rate from your accumulated Nest Egg.",
+            sub_value=f"(${traditional_annual_income/12:,.0f} / month)"
+        )
+
 
     # --- MAIN VISUALIZATION CONTROLS ---
     
