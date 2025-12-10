@@ -404,6 +404,10 @@ def main():
         text-align: center;
         margin-bottom: 10px;
         height: 100%;
+        min-height: 180px; /* Enforce minimum height for alignment */
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     .kpi-title {
         font-size: 13px;
@@ -800,10 +804,19 @@ def main():
         scenario_keys.append("Custom")
         display_map["Custom"] = f"Custom (Age {custom_exit_age})"
         
+        # FIX FOR RESETTING: Calculate index explicitly based on state
+        current_selection = st.session_state.get("scenario_selector", "Work")
+        try:
+            default_ix = scenario_keys.index(current_selection)
+        except ValueError:
+            default_ix = 0
+
         selected_key = st.selectbox(
             "Visualize Scenario:", 
             options=scenario_keys, 
-            format_func=lambda x: display_map[x]
+            format_func=lambda x: display_map[x],
+            index=default_ix,
+            key="scenario_selector"
         )
 
     # 2. Logic for Scenario
