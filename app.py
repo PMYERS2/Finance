@@ -73,3 +73,8 @@
             
         # Calculate Safe annual income from that pot
         traditional_annual_income = traditional_balance_display * base_swr_30yr
+
+
+    # --- TOP ROW: THE VERDICT (Populate Container) ---
+    
+    def render_card(col, title, value, desc, sub_value=None):
