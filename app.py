@@ -400,11 +400,11 @@ def main():
         background-color: #F8F9FA;
         border: 1px solid #E9ECEF;
         border-radius: 8px;
-        padding: 10px 15px;
+        padding: 10px 5px;
         text-align: center;
         margin-bottom: 10px;
         height: 100%;
-        min-height: 180px; /* Enforce minimum height for alignment */
+        min-height: 120px; /* Reduced min-height for compactness */
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -417,14 +417,14 @@ def main():
         margin-bottom: 2px;
     }
     .kpi-value {
-        font-size: 26px;
+        font-size: 22px;
         font-weight: 700;
         color: #212529;
         margin: 0;
         line-height: 1.2;
     }
     .kpi-subtitle {
-        font-size: 12px;
+        font-size: 11px;
         color: #495057;
         margin-top: 5px;
         line-height: 1.4;
@@ -443,8 +443,8 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # REMOVED TITLE AS REQUESTED
-    # st.title("Financial Independence Planner")
+    # Description of purpose
+    st.markdown("### Purpose of report: Forecast net worth overtime or estimate retirement age.")
     
     # MOVED SHOW REAL DOLLARS TO TOP
     show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
@@ -453,8 +453,21 @@ def main():
     kpi_container = st.container()
     
     # --- SIDEBAR: Grouped & Organized ---
-    with st.sidebar.expander("1. Profile & Current State", expanded=True):
-        current_age = st.number_input("Current Age", 20, 100, 30)
+    
+    # Global Settings (Age affects defaults)
+    current_age = st.sidebar.number_input("Current Age", 20, 100, 30)
+    
+    # 1. Future Goals (Moved to Top)
+    with st.sidebar.expander("1. Future Goals", expanded=True):
+        # FIX: Dynamic default for retirement age to prevent error if current_age >= 60
+        ret_default = max(60, current_age + 1)
+        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
+        
+        fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
+        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
+
+    # 2. Profile Details
+    with st.sidebar.expander("2. Income & Expenses", expanded=True):
         start_income = st.number_input("Pre-tax Income ($)", 0, 1000000, 90000, step=5000)
         expense_today = st.number_input("Current Expenses ($/yr)", 0, 500000, 36000, step=1000)
     
@@ -476,7 +489,7 @@ def main():
         if p1_pct != 0: promotions[p1_age] = p1_pct
         if p2_pct != 0: promotions[p2_age] = p2_pct
 
-    with st.sidebar.expander("2. Assets & Housing", expanded=True):
+    with st.sidebar.expander("3. Assets & Housing", expanded=True):
         start_balance_input = st.number_input("Invested Assets ($)", 0, 10000000, 100000, step=5000)
         
         include_home = st.checkbox("Include Home Strategy", True)
@@ -519,22 +532,14 @@ def main():
             current_rent = st.number_input("Current Rent", value=1100)
             est_prop_tax_monthly = st.number_input("Tax/Ins ($/mo)", value=300)
 
-    with st.sidebar.expander("3. Future Goals", expanded=True):
-        # FIX: Dynamic default for retirement age to prevent error if current_age >= 60
-        ret_default = max(60, current_age + 1)
-        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
-        
-        fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
-        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
-
     with st.sidebar.expander("Assumptions & Adjustments", expanded=False):
         annual_rate_base = st.slider("Investment Return (%)", 0.0, 15.0, 9.0, 0.5) / 100.0
         infl_rate = st.number_input("Inflation (%)", 0.0, 10.0, 3.0, 0.1) / 100.0
         base_swr_30yr = st.number_input("Safe Withdrawal Rate (%)", 1.0, 10.0, 4.0, 0.1) / 100.0
         state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
         expense_growth_rate = st.number_input("Expense Growth > Inflation (%)", 0.0, 10.0, 0.0, 0.5) / 100.0
-        savings_rate_override = st.slider("Force Savings Rate (%)", 0.0, 1.0, 0.0, 0.05)
-        # Removed show_real from sidebar, moved to main dashboard area below
+        # REMOVED FORCE SAVINGS RATE SLIDER
+        savings_rate_override = 0.0 
         
         st.markdown("---")
         st.markdown("**Early Withdrawal Taxes**")
@@ -735,41 +740,39 @@ def main():
             st.markdown(html_content, unsafe_allow_html=True)
 
     with kpi_container:
-        # SECTION 1: EARLY RETIREMENT MILESTONES
-        st.markdown('<div class="section-header">1. Early Retirement Milestones</div>', unsafe_allow_html=True)
-        col1, col2, col3 = st.columns(3)
+        # Combined into Single Row
+        col1, col2, col3, col4, col5 = st.columns(5)
         
+        # 1. Regular FIRE
         val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
         color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
         render_card(col1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", f"Quit completely. Target: ${fi_target_bal:,.0f}.")
 
+        # 2. Barista FIRE
         val_bar = str(barista_age) if barista_age else "N/A"
         color_bar = "#0D47A1" if barista_age else "#CC0000"
         render_card(col2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", f"Switch to ${barista_income_today/1000:.0f}k job.")
         
+        # 3. Coast FIRE
         val_cst = str(coast_age) if coast_age else "N/A"
         color_cst = "#0D47A1" if coast_age else "#CC0000"
         render_card(col3, "Coast FIRE Age", f"<span style='color:{color_cst}'>{val_cst}</span>", f"Stop saving. Work to cover expenses only.")
 
-        # SECTION 2: TRADITIONAL PATH
-        st.markdown(f'<div class="section-header">2. Traditional Path (Working until Age {retirement_age})</div>', unsafe_allow_html=True)
-        t_col1, t_col2 = st.columns(2)
-        
-        # Card 1: The Pot
+        # 4. Traditional Pot
         render_card(
-            t_col1, 
-            f"Total Nest Egg at Age {retirement_age}", 
+            col4, 
+            f"Nest Egg at {retirement_age}", 
             f"${traditional_balance_display:,.0f}", 
-            "Projected portfolio balance if you continue working and contributing until full retirement age."
+            "Projected portfolio balance if you continue working."
         )
         
-        # Card 2: The Income
+        # 5. Traditional Income
         render_card(
-            t_col2, 
-            f"Potential Annual Income", 
-            f"${traditional_annual_income:,.0f} / yr", 
-            f"Based on a {base_swr_30yr*100:.1f}% Safe Withdrawal Rate from your accumulated Nest Egg.",
-            sub_value=f"(${traditional_annual_income/12:,.0f} / month)"
+            col5, 
+            f"Future Income", 
+            f"${traditional_annual_income:,.0f}/yr", 
+            f"Based on {base_swr_30yr*100:.1f}% SWR.",
+            sub_value=f"(${traditional_annual_income/12:,.0f}/mo)"
         )
 
 
