@@ -439,8 +439,12 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    st.title("Financial Independence Planner")
+    # REMOVED TITLE AS REQUESTED
+    # st.title("Financial Independence Planner")
     
+    # MOVED SHOW REAL DOLLARS TO TOP
+    show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
+
     # Container for Verdict Cards (so they can be populated after we define dashboard controls below)
     kpi_container = st.container()
     
@@ -554,18 +558,6 @@ def main():
             car_interval_years = c1.number_input("Replace Every (Yrs)", value=8)
         else:
             car_cost_today, first_car_age, car_interval_years = 0,0,0
-
-    # --- DASHBOARD LAYOUT START ---
-    st.markdown("---")
-    sim_col, _ = st.columns([1, 2])
-    
-    # Define Controls that affect calculation/display (BEFORE calculation logic)
-    with sim_col:
-        c_check1, c_check2 = st.columns(2)
-        with c_check1:
-            show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
-        with c_check2:
-            use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
 
     # --- CALCULATION ENGINE ---
     # (Same logic as before, just processing the data)
@@ -777,18 +769,23 @@ def main():
         )
 
 
-    # --- MAIN VISUALIZATION CONTROLS ---
+    # --- MAIN VISUALIZATION CONTROLS & LAYOUT ---
     
-    # 1. Controller (Resume filling sim_col)
-    with sim_col:
+    st.markdown("---")
+    
+    # SPLIT LAYOUT: Graph on Left (3), Controls on Right (1)
+    viz_col, control_col = st.columns([3, 1])
+    
+    # 1. Define Controls in Right Column
+    with control_col:
+        st.markdown("**Scenario Settings**")
+        use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
+        
         # Custom Early Retirement Slider
         default_exit = fi_age_regular if fi_age_regular else 55
-        custom_exit_age = st.slider("Select Custom Early Retirement Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
+        custom_exit_age = st.slider("Custom Early Ret. Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
         
-        # --- FIXED: Stable Selectbox Logic ---
-        # We track the KEY (e.g. "Coast") rather than the descriptive string (e.g. "Coast FIRE (Age 45)")
-        # This prevents the selection from resetting when the calculated age changes due to expense updates.
-        
+        # Scenario Selector
         scenario_keys = ["Work"]
         display_map = {"Work": "Work until Full Retirement"}
         
@@ -801,7 +798,7 @@ def main():
             display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
             
         scenario_keys.append("Custom")
-        display_map["Custom"] = f"Custom Early Retirement (Age {custom_exit_age})"
+        display_map["Custom"] = f"Custom (Age {custom_exit_age})"
         
         selected_key = st.selectbox(
             "Visualize Scenario:", 
@@ -964,79 +961,80 @@ def main():
         for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear"]:
             df_chart[c] /= df_chart["DF"]
 
-    # 5. Plot
-    plot_end = retirement_age
-    # If using custom stop logic (like is_early), we cap at retirement_age to avoid overshoot unless early is actually later (unlikely)
-    
-    df_p = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
-    
-    fig = go.Figure()
-    # Main Balance (Stacked Bar)
-    fig.add_trace(go.Bar(
-        x=df_p["Age"], y=df_p["Balance"], 
-        name="Invested Assets",
-        marker_color='rgba(58, 110, 165, 0.8)', # Strong Blue
-        hovertemplate="$%{y:,.0f}"
-    ))
-    # Home Equity (Stacked Bar)
-    fig.add_trace(go.Bar(
-        x=df_p["Age"], y=df_p["HomeEquity"], 
-        name="Home Equity",
-        marker_color='rgba(167, 173, 178, 0.5)', # Grey
-        hovertemplate="$%{y:,.0f}"
-    ))
-    
-    # Add Millionaire Milestone Dot
-    milestone = df_p[df_p["NetWorth"] >= 1000000]
-    if not milestone.empty:
-        m_row = milestone.iloc[0]
-        fig.add_trace(go.Scatter(
-            x=[m_row["Age"]],
-            y=[m_row["NetWorth"]],
-            mode="markers+text",
-            name="Hit $1M",
-            text=["Hit $1M!"],
-            textposition="top center",
-            marker=dict(color="#D32F2F", size=15, symbol="circle"),
-            showlegend=False
+    # 5. Plot (In Left Column)
+    with viz_col:
+        plot_end = retirement_age
+        # If using custom stop logic (like is_early), we cap at retirement_age to avoid overshoot unless early is actually later (unlikely)
+        
+        df_p = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
+        
+        fig = go.Figure()
+        # Main Balance (Stacked Bar)
+        fig.add_trace(go.Bar(
+            x=df_p["Age"], y=df_p["Balance"], 
+            name="Invested Assets",
+            marker_color='rgba(58, 110, 165, 0.8)', # Strong Blue
+            hovertemplate="$%{y:,.0f}"
         ))
-    
-    # Final Number Annotation
-    if not df_p.empty:
-        final_row = df_p.iloc[-1]
-        fig.add_annotation(
-            x=final_row["Age"],
-            y=final_row["NetWorth"],
-            text=f"<b>${final_row['NetWorth']:,.0f}</b>",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=2,
-            ax=0,
-            ay=-40,
-            font=dict(size=16, color="black"),
-            bgcolor="rgba(255,255,255,0.8)",
-            bordercolor="black",
-            borderwidth=1
+        # Home Equity (Stacked Bar)
+        fig.add_trace(go.Bar(
+            x=df_p["Age"], y=df_p["HomeEquity"], 
+            name="Home Equity",
+            marker_color='rgba(167, 173, 178, 0.5)', # Grey
+            hovertemplate="$%{y:,.0f}"
+        ))
+        
+        # Add Millionaire Milestone Dot
+        milestone = df_p[df_p["NetWorth"] >= 1000000]
+        if not milestone.empty:
+            m_row = milestone.iloc[0]
+            fig.add_trace(go.Scatter(
+                x=[m_row["Age"]],
+                y=[m_row["NetWorth"]],
+                mode="markers+text",
+                name="Hit $1M",
+                text=["Hit $1M!"],
+                textposition="top center",
+                marker=dict(color="#D32F2F", size=15, symbol="circle"),
+                showlegend=False
+            ))
+        
+        # Final Number Annotation
+        if not df_p.empty:
+            final_row = df_p.iloc[-1]
+            fig.add_annotation(
+                x=final_row["Age"],
+                y=final_row["NetWorth"],
+                text=f"<b>${final_row['NetWorth']:,.0f}</b>",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1,
+                arrowwidth=2,
+                ax=0,
+                ay=-40,
+                font=dict(size=16, color="black"),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="black",
+                borderwidth=1
+            )
+        
+        # Target Line
+        target_val = fi_target_bal
+        if show_real and infl_rate > 0: target_val = fi_annual_spend_today / base_swr_30yr
+        
+        # Visual Polish
+        fig.update_layout(
+            title="Net Worth Projection",
+            xaxis_title="Age", yaxis_title="Value ($)",
+            barmode='stack',
+            hovermode="x unified",
+            legend=dict(orientation="h", y=1.02, x=0.01),
+            margin=dict(l=20, r=20, t=40, b=20),
+            height=400,
+            yaxis=dict(tickformat=",.0f")
         )
-    
-    # Target Line
-    target_val = fi_target_bal
-    if show_real and infl_rate > 0: target_val = fi_annual_spend_today / base_swr_30yr
-    
-    # Visual Polish
-    fig.update_layout(
-        title="Net Worth Projection",
-        xaxis_title="Age", yaxis_title="Value ($)",
-        barmode='stack',
-        hovermode="x unified",
-        legend=dict(orientation="h", y=1.02, x=0.01),
-        margin=dict(l=20, r=20, t=40, b=20),
-        height=400,
-        yaxis=dict(tickformat=",.0f")
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
+        
+        st.plotly_chart(fig, use_container_width=True)
 
     # --- TABS FOR DETAILS ---
     tab1, tab2, tab3, tab4 = st.tabs(["Risk Analysis", "Cash Flow Details", "Audit Table", "Detailed Schedule"])
