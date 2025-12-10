@@ -724,17 +724,19 @@ def main():
     def render_card(col, title, value, desc, sub_value=None):
         sub_html = f"<div style='font-size:14px; font-weight:600; color:#2E7D32; margin-top:4px;'>{sub_value}</div>" if sub_value else ""
         
-        html_content = f"""
-        <div class="kpi-card">
-            <div class="kpi-title">{title}</div>
-            <div class="kpi-value">{value}</div>
-            {sub_html}
-            <div class="kpi-subtitle">{textwrap.shorten(desc, width=120, placeholder="...")}</div>
-        </div>
-        """
+        # Use simple string concatenation to avoid IndentationError or Markdown code-block interpretation
+        # This guarantees the HTML is treated as a flat string with no leading whitespace issues.
+        html_content = (
+            f'<div class="kpi-card">'
+            f'<div class="kpi-title">{title}</div>'
+            f'<div class="kpi-value">{value}</div>'
+            f'{sub_html}'
+            f'<div class="kpi-subtitle">{textwrap.shorten(desc, width=120, placeholder="...")}</div>'
+            f'</div>'
+        )
         
         with col:
-            st.markdown(textwrap.dedent(html_content), unsafe_allow_html=True)
+            st.markdown(html_content, unsafe_allow_html=True)
 
     with kpi_container:
         # SECTION 1: EARLY RETIREMENT MILESTONES
