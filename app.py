@@ -271,21 +271,63 @@ def compute_regular_fi_age(
     if fi_annual_spend_today <= 0 or base_swr <= 0 or df_full is None:
         return None, None
         
-    target_at_60 = fi_annual_spend_today / base_swr
+    # Calculated Real Target (e.g. $60k / 0.04 = $1.5M)
+    target_real_needed = fi_annual_spend_today / base_swr
+    
+    # Map Age -> Nominal Start-of-Year Balance (Working Scenario)
+    balance_nominal_by_age = {}
+    balance_nominal_by_age[current_age] = start_balance_input 
+    for row in df_full.itertuples():
+        balance_nominal_by_age[row.Age] = row.StartBalance
+    last_row = df_full.iloc[-1]
+    balance_nominal_by_age[last_row.Age + 1] = last_row.EndBalance
+
+    # Access age for bridging (Standard penalty-free age)
     access_age = 60
-    
-    # CHANGED: Reverting to simulation-based check (Safe FIRE).
-    # Instead of just checking "Did I hit the number?", we check:
-    # "If I quit now, do I still have the full target amount remaining at Age 60?"
-    # This accounts for penalties and drag during the gap years.
-    
-    age, bal = compute_bridge_age(
-        df_full, current_age, access_age, start_balance_input, annual_rates_by_year_full,
-        infl_rate, show_real, fi_annual_spend_today, target_at_60,
-        early_withdrawal_tax_rate, use_yearly_compounding
-    )
-    
-    return age, target_at_60
+
+    # Iterate from next year until retirement age
+    start_age_candidate = current_age + 1
+    for age in range(start_age_candidate, retirement_age + 1):
+        if age not in balance_nominal_by_age: continue
+        
+        start_bal = balance_nominal_by_age[age]
+        
+        # --- CHECK 1: HIT THE NUMBER (TODAY) ---
+        # "Do I have enough money in the account right now?"
+        years_passed = age - current_age
+        target_nominal_today = target_real_needed * ((1 + infl_rate) ** years_passed)
+        
+        if start_bal < target_nominal_today:
+            # We fail Gate 1: We haven't saved enough yet.
+            continue
+            
+        # --- CHECK 2: SURVIVE THE BRIDGE (FUTURE) ---
+        # "If I quit now, will I still have the target amount at Age 60?"
+        # This handles early withdrawal penalties, drag, etc.
+        
+        bridge_end_age = max(age, access_age)
+        years_to_bridge = bridge_end_age - current_age
+        target_nominal_at_bridge_end = target_real_needed * ((1 + infl_rate) ** years_to_bridge)
+        
+        proj_bal_at_bridge_end = simulate_period_exact(
+            start_balance_nominal=start_bal,
+            start_age=age,
+            end_age=bridge_end_age,
+            current_age=current_age,
+            annual_rates_full=annual_rates_by_year_full,
+            annual_expense_real=fi_annual_spend_today, # Withdraw full spend
+            monthly_contrib_real=0.0, # Stop contributing
+            infl_rate=infl_rate,
+            tax_rate=0.0,
+            early_withdrawal_tax_rate=early_withdrawal_tax_rate,
+            use_yearly_compounding=use_yearly_compounding
+        )
+        
+        if proj_bal_at_bridge_end >= target_nominal_at_bridge_end:
+            # We passed both checks.
+            return age, target_real_needed
+
+    return None, target_real_needed
 
 
 def compute_barista_fi_age(
