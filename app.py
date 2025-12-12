@@ -1048,7 +1048,7 @@ def main():
     if show_real and infl_rate > 0:
         df_chart["DF"] = (1+infl_rate)**df_chart["Year"]
         # Standard Cols
-        for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense"]:
+        for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense", "ContribYear"]:
             df_chart[c] /= df_chart["DF"]
         # Breakdown Cols
         for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear"]:
@@ -1130,7 +1130,7 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
 
     # --- TABS FOR DETAILS ---
-    tab1, tab2, tab3, tab4 = st.tabs(["Risk Analysis", "Cash Flow Details", "Audit & Manual Math", "Detailed Schedule"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Risk Analysis", "Cash Flow Details", "Net Worth Table", "Audit Table"])
     
     with tab1:
         st.caption("How market volatility (+/- 1% annual return) impacts your outcome.")
@@ -1198,54 +1198,8 @@ def main():
         st.plotly_chart(fig_s, use_container_width=True)
 
     with tab3:
-        st.markdown(f"**Manual Calculation Guide ({compounding_type} Mode)**")
-        st.caption("Use this formula to verify the numbers in the 'Detailed Schedule' tab yourself.")
-        
-        if use_yearly:
-            st.markdown("""
-            ### 🧮 Yearly Compounding Formula
-            In this mode, math is simplified so you can verify it with a basic calculator.
-            
-            **Step 1:** Start with **Previous Year Balance**
-            
-            **Step 2:** Calculate Growth
-            $$
-            \\text{Growth} = \\text{Previous Balance} \\times \\text{Annual Rate}
-            $$
-            *(Note: Interest is calculated only on the starting balance for simplicity)*
-            
-            **Step 3:** Add Contributions (Lump sum)
-            $$
-            \\text{Total Contributions} = \\text{Monthly Savings} \\times 12
-            $$
-            
-            **Step 4:** Subtract Expenses/Drawdowns
-            $$
-            \\text{Total Draw} = \\text{Expenses} + \\text{Taxes}
-            $$
-            
-            **Final Balance:**
-            $$
-            \\text{New Balance} = \\text{Previous Balance} + \\text{Growth} + \\text{Total Contributions} - \\text{Total Draw}
-            $$
-            """)
-        else:
-            st.markdown("""
-            ### 📅 Monthly Compounding Formula (Precise)
-            In this mode, interest compounds every month. This yields slightly higher results than the yearly simplified method.
-            
-            **Process (Repeated 12 times per year):**
-            1. Add Monthly Contribution.
-            2. Calculate Monthly Interest: $\\text{Balance} \\times (\\text{Annual Rate} / 12)$.
-            3. Add Interest to Balance.
-            4. Repeat for next month.
-            
-            **At Year End:**
-            Subtract Total Annual Expenses/Drawdowns.
-            """)
-            
-        st.write("---")
-        st.write("### Data Table")
+        st.markdown("### Net Worth Summary")
+        st.caption("Simplified overview of your projected wealth over time.")
         
         format_dict = {
             "Balance": "${:,.0f}",
@@ -1261,8 +1215,23 @@ def main():
         )
         
     with tab4:
-        st.markdown("**Scenario Detail: " + scenario_label + "**")
-        st.caption("Breakdown of withdrawals. 'LivingWithdrawal' matches your Retirement Spend input. 'TotalPortfolioDraw' includes taxes and one-time costs.")
+        st.markdown(f"**Audit Table: {scenario_label}**")
+        st.caption("Use this table to verify the math row-by-row.")
+
+        st.markdown("""
+        #### 🧮 How to calculate the Balance
+        To reproduce the **Balance** column, use the following equation (this is easiest to verify if **"Show Real Dollars"** is UNCHECKED, as inflation adjustment complicates row-by-row addition):
+        
+        $$
+        \\text{Balance}_{End} = \\text{Balance}_{Start} + \\text{Growth} + \\text{AnnualSavings} - \\text{Withdrawals}
+        $$
+        
+        Where:
+        * $\\text{Balance}_{Start}$: The Balance from the previous year.
+        * $\\text{Growth}$ (`InvestGrowthYear`): The return earned on your portfolio this year.
+        * $\\text{AnnualSavings}$ (`ContribYear`): New savings added to the portfolio (Income - Expenses).
+        * $\\text{Withdrawals}$ (`TotalPortfolioDraw`): Money taken OUT of the portfolio (includes Retirement Spending + Taxes + Kids + Cars + Home).
+        """)
         
         # Prepare table data
         format_dict_d = {
@@ -1276,6 +1245,7 @@ def main():
             "TotalPortfolioDraw": "${:,.0f}",
             "ScenarioActiveIncome": "${:,.0f}",
             "InvestGrowthYear": "${:,.0f}",
+            "ContribYear": "${:,.0f}",
             "AnnualRate": "{:.2%}",
             "Age": "{:.0f}"
         }
@@ -1285,14 +1255,16 @@ def main():
             "Age", 
             "AnnualRate",
             "InvestGrowthYear",
+            "ContribYear", # NEW: Added so the math balances
+            "TotalPortfolioDraw",
+            "Balance",
+            # Breakdown cols
             "LivingWithdrawal", 
             "TaxPenalty", 
             "KidCost", 
             "CarCost", 
             "HomeCost",
-            "TotalPortfolioDraw",
-            "ScenarioActiveIncome",
-            "Balance"
+            "ScenarioActiveIncome"
         ]
         
         st.dataframe(
