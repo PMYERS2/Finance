@@ -233,9 +233,6 @@ def compute_barista_fi_age(
     # Calculate GAP based on Barista Spend, not Full Retirement Spend
     gap = max(0, barista_spend_today - barista_income_today)
     
-    if gap == 0 and barista_income_today >= barista_spend_today:
-        return current_age, 0 
-        
     if base_swr <= 0 or df_full is None:
         return None, None
 
@@ -249,7 +246,8 @@ def compute_barista_fi_age(
     balance_map[current_age] = start_balance_input
     
     # We iterate through candidate start ages
-    for age in range(current_age + 1, barista_until_age + 1):
+    # Checking current_age is allowed (immediate transition)
+    for age in range(current_age, barista_until_age + 1):
         if age not in balance_map: continue
         
         start_bal = balance_map[age]
