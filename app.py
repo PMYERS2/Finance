@@ -221,24 +221,26 @@ def compute_regular_fi_age(
     return None, fi_annual_spend_today / base_swr
 
 def compute_barista_fi_age(
-    df_full, current_age, start_balance_input, fi_annual_spend_today, barista_income_today,
+    df_full, current_age, start_balance_input, fi_annual_spend_today, barista_income_today, barista_spend_today,
     infl_rate, base_swr, barista_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly_compounding
 ):
     # Updated Barista FIRE Definition:
     # 1. Start Barista Job at Age X.
-    # 2. Withdraw (Expenses - Barista Income) annually from Age X to 'barista_until_age'.
+    # 2. Withdraw (BaristaSpend - BaristaIncome) annually from Age X to 'barista_until_age'.
     # 3. CRITICAL: At 'barista_until_age', the remaining balance MUST equal the Full FI Number 
-    #    (Expenses / SWR_at_that_age).
+    #    (FullExpenses / SWR_at_that_age).
     
-    gap = max(0, fi_annual_spend_today - barista_income_today)
+    # Calculate GAP based on Barista Spend, not Full Retirement Spend
+    gap = max(0, barista_spend_today - barista_income_today)
     
-    if gap == 0 and barista_income_today >= fi_annual_spend_today:
+    if gap == 0 and barista_income_today >= barista_spend_today:
         return current_age, 0 
         
     if base_swr <= 0 or df_full is None:
         return None, None
 
     # Calculate the Target we need to hit at the END of the Barista Phase (e.g. at 60)
+    # This target is based on FULL RETIREMENT SPENDING
     final_swr = get_dynamic_swr(barista_until_age, base_swr)
     target_real_at_finish = fi_annual_spend_today / final_swr
     
@@ -264,7 +266,7 @@ def compute_barista_fi_age(
             end_age=barista_until_age,
             current_age=current_age,
             annual_rates_full=annual_rates_by_year_full,
-            annual_expense_real=gap, # Withdrawal is just the gap
+            annual_expense_real=gap, # Withdrawal is just the gap (Spend - Income)
             monthly_contrib_real=0.0,
             infl_rate=infl_rate,
             tax_rate=0.0, # Simplified
@@ -565,6 +567,8 @@ def main():
         
         fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
         barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
+        # ADDED NEW INPUT HERE
+        barista_spend_today = st.number_input("Barista Annual Spend ($)", 0, 500000, 50000, step=5000, help="Spending specifically during Barista years. Often lower than full retirement.")
         barista_until_age = st.number_input("Work Barista Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
 
     # 3. Assets & Housing (Reordered Third)
@@ -805,7 +809,7 @@ def main():
         infl_rate, base_swr_30yr
     )
     barista_age, _ = compute_barista_fi_age(
-        df_full, current_age, start_balance_effective, fi_annual_spend_today, barista_income_today, 
+        df_full, current_age, start_balance_effective, fi_annual_spend_today, barista_income_today, barista_spend_today, 
         infl_rate, base_swr_30yr, barista_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly
     )
 
@@ -915,7 +919,8 @@ def main():
                  if age < barista_until_age:
                      # BARISTA PHASE
                      active_income_this_year = barista_income_today
-                     base_need = max(0, fi_annual_spend_today - barista_income_today) * ((1+infl_rate)**(y+1))
+                     # Use Barista specific spend
+                     base_need = max(0, barista_spend_today - barista_income_today) * ((1+infl_rate)**(y+1))
                  else:
                      # FULL RETIREMENT PHASE (After Barista)
                      base_need = fi_annual_spend_today * ((1+infl_rate)**(y+1))
@@ -1243,6 +1248,10 @@ def main():
                     # Working Phase: Expense grows from 'Current Expenses'
                     val_nom = expense_today * ((1 + expense_growth_rate) ** idx) * infl_factor_nominal
                     base_expenses_plot.append(val_nom)
+                elif is_barista and age < barista_until_age:
+                     # Barista Phase: Use specific barista spend
+                     val_nom = barista_spend_today * infl_factor_nominal
+                     base_expenses_plot.append(val_nom)
                 else:
                     # Retirement/Barista Phase: Expense is 'Retirement Spend' Target
                     val_nom = fi_annual_spend_today * infl_factor_nominal
