@@ -774,22 +774,18 @@ def main():
         
         with sec_fire:
             st.markdown('<div class="compact-header">🚀 FIRE Goals (Start of Year Balances)</div>', unsafe_allow_html=True)
-            c1, c2, c3 = st.columns(3)
+            c1, c2 = st.columns(2)
             
             # Regular FIRE
             val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
             color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
-            render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", f"Target: ${fi_target_bal:,.0f}.")
+            render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", "Based on Safe Withdrawal Rate.")
 
             # Barista FIRE
             val_bar = str(barista_age) if barista_age else "N/A"
             color_bar = "#0D47A1" if barista_age else "#CC0000"
             render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", f"Switch to ${barista_income_today/1000:.0f}k job.")
             
-            # Coast FIRE
-            val_cst = str(coast_age) if coast_age else "N/A"
-            color_cst = "#0D47A1" if coast_age else "#CC0000"
-            render_card(c3, "Coast FIRE Age", f"<span style='color:{color_cst}'>{val_cst}</span>", f"Stop saving. Work for expenses.")
 
         with sec_trad:
             st.markdown(f'<div class="compact-header">👴 Traditional (Age {retirement_age})</div>', unsafe_allow_html=True)
@@ -833,10 +829,6 @@ def main():
         scenario_keys = ["Work"]
         display_map = {"Work": "Work until Full Retirement"}
         
-        if coast_age:
-            scenario_keys.append("Coast")
-            display_map["Coast"] = f"Coast FIRE (Age {coast_age})"
-            
         if barista_age:
             scenario_keys.append("Barista")
             display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
@@ -862,10 +854,7 @@ def main():
     stop_age = retirement_age # Default
     is_coast, is_barista, is_early = False, False, False
     
-    if selected_key == "Coast":
-        stop_age = coast_age
-        is_coast = True
-    elif selected_key == "Barista":
+    if selected_key == "Barista":
         stop_age = barista_age
         is_barista = True
     elif selected_key == "Custom":
@@ -908,14 +897,7 @@ def main():
         
         # 2. Retirement Phase Expenses
         if age >= stop_age:
-            if is_coast:
-                 active_income_this_year = fi_annual_spend_today 
-                 if age < retirement_age: 
-                     base_need = 0.0 
-                 else: 
-                     base_need = fi_annual_spend_today * ((1+infl_rate)**(y+1))
-                     active_income_this_year = 0.0
-            elif is_barista:
+            if is_barista:
                  if age < retirement_age:
                      active_income_this_year = barista_income_today
                      base_need = max(0, fi_annual_spend_today - barista_income_today) * ((1+infl_rate)**(y+1))
