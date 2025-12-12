@@ -411,59 +411,68 @@ def main():
     st.set_page_config(page_title="FIRE Planner", layout="wide")
     
     # Custom CSS for "Cards" styling
+    # ADJUSTED: Reduced padding, margin, and font sizes for a more compact single-row look
     st.markdown("""
     <style>
     .kpi-card {
         background-color: #F8F9FA;
         border: 1px solid #E9ECEF;
         border-radius: 8px;
-        padding: 10px 5px;
+        padding: 8px 4px;
         text-align: center;
-        margin-bottom: 10px;
+        margin-bottom: 5px;
         height: 100%;
-        min-height: 120px;
+        min-height: 90px;
         display: flex;
         flex-direction: column;
         justify-content: center;
     }
     .kpi-title {
-        font-size: 13px;
+        font-size: 11px;
         color: #6C757D;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         margin-bottom: 2px;
     }
     .kpi-value {
-        font-size: 22px;
+        font-size: 18px;
         font-weight: 700;
         color: #212529;
         margin: 0;
         line-height: 1.2;
     }
     .kpi-subtitle {
-        font-size: 11px;
+        font-size: 10px;
         color: #495057;
-        margin-top: 5px;
-        line-height: 1.4;
+        margin-top: 4px;
+        line-height: 1.3;
     }
     .kpi-highlight {
         color: #0D47A1;
     }
     .section-header {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 600;
-        margin-top: 10px;
-        margin-bottom: 10px;
-        padding-bottom: 5px;
+        margin-top: 0px;
+        margin-bottom: 5px;
+        padding-bottom: 0px;
         border-bottom: 2px solid #f0f0f0;
+    }
+    .compact-header {
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 5px;
+        color: #333;
     }
     </style>
     """, unsafe_allow_html=True)
 
-    # Description of purpose
-    st.markdown("##### Purpose of report: Forecast net worth overtime or estimate retirement age.")
-    
-    show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
+    # Description of purpose (Make it small)
+    c_head_1, c_head_2 = st.columns([3, 1])
+    with c_head_1:
+        st.markdown("##### 🔮 FIRE & Retirement Forecaster")
+    with c_head_2:
+        show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
 
     # Container for Verdict Cards
     kpi_container = st.container()
@@ -708,6 +717,7 @@ def main():
             if y >= purchase_idx:
                 maint_cost = price_nom * maintenance_pct
                 annual_expense_by_year_nominal_full[y] += maint_cost
+                annual_expense_by_year_nominal_full[y] += maint_cost
                 exp_housing_nominal[y] += maint_cost
 
     for y in range(years_full):
@@ -766,17 +776,17 @@ def main():
         traditional_annual_income = traditional_balance_display * base_swr_30yr
 
 
-    # --- TOP ROW: THE VERDICT (Populate Container) ---
+    # --- TOP ROW: THE VERDICT (Redesigned for Single Screen) ---
     
     def render_card(col, title, value, desc, sub_value=None):
-        sub_html = f"<div style='font-size:14px; font-weight:600; color:#2E7D32; margin-top:4px;'>{sub_value}</div>" if sub_value else ""
+        sub_html = f"<div style='font-size:12px; font-weight:600; color:#2E7D32; margin-top:2px;'>{sub_value}</div>" if sub_value else ""
         
         html_content = (
             f'<div class="kpi-card">'
             f'<div class="kpi-title">{title}</div>'
             f'<div class="kpi-value">{value}</div>'
             f'{sub_html}'
-            f'<div class="kpi-subtitle">{textwrap.shorten(desc, width=120, placeholder="...")}</div>'
+            f'<div class="kpi-subtitle">{textwrap.shorten(desc, width=60, placeholder="...")}</div>'
             f'</div>'
         )
         
@@ -784,54 +794,56 @@ def main():
             st.markdown(html_content, unsafe_allow_html=True)
 
     with kpi_container:
-        # --- SPLIT INTO 2 SECTIONS AS REQUESTED ---
+        # Layout: 2 Main Sections side-by-side to save vertical space
+        # Left Section (FIRE) takes ~60%, Right Section (Traditional) takes ~40%
         
-        # 1. FIRE Section (3 Columns)
-        st.markdown("#### 🚀 FIRE Goals")
-        c1, c2, c3 = st.columns(3)
+        sec_fire, sec_gap, sec_trad = st.columns([1.6, 0.1, 1.1])
         
-        # Regular FIRE
-        val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
-        color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
-        render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", f"Quit completely. Target: ${fi_target_bal:,.0f}.")
+        with sec_fire:
+            st.markdown('<div class="compact-header">🚀 FIRE Goals</div>', unsafe_allow_html=True)
+            c1, c2, c3 = st.columns(3)
+            
+            # Regular FIRE
+            val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
+            color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
+            render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", f"Target: ${fi_target_bal:,.0f}.")
 
-        # Barista FIRE
-        val_bar = str(barista_age) if barista_age else "N/A"
-        color_bar = "#0D47A1" if barista_age else "#CC0000"
-        render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", f"Switch to ${barista_income_today/1000:.0f}k job.")
-        
-        # Coast FIRE
-        val_cst = str(coast_age) if coast_age else "N/A"
-        color_cst = "#0D47A1" if coast_age else "#CC0000"
-        render_card(c3, "Coast FIRE Age", f"<span style='color:{color_cst}'>{val_cst}</span>", f"Stop saving. Work to cover expenses only.")
+            # Barista FIRE
+            val_bar = str(barista_age) if barista_age else "N/A"
+            color_bar = "#0D47A1" if barista_age else "#CC0000"
+            render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", f"Switch to ${barista_income_today/1000:.0f}k job.")
+            
+            # Coast FIRE
+            val_cst = str(coast_age) if coast_age else "N/A"
+            color_cst = "#0D47A1" if coast_age else "#CC0000"
+            render_card(c3, "Coast FIRE Age", f"<span style='color:{color_cst}'>{val_cst}</span>", f"Stop saving. Work for expenses.")
 
-        st.markdown("---")
-        
-        # 2. Traditional Section (2 Columns)
-        st.markdown(f"#### 👴 Traditional Retirement (Age {retirement_age})")
-        c4, c5 = st.columns(2)
+        with sec_trad:
+            st.markdown(f'<div class="compact-header">👴 Traditional (Age {retirement_age})</div>', unsafe_allow_html=True)
+            c4, c5 = st.columns(2)
 
-        # Traditional Pot
-        render_card(
-            c4, 
-            f"Nest Egg at {retirement_age}", 
-            f"${traditional_balance_display:,.0f}", 
-            "Projected portfolio balance if you continue working."
-        )
-        
-        # Traditional Income
-        render_card(
-            c5, 
-            f"Future Income", 
-            f"${traditional_annual_income:,.0f}/yr", 
-            f"Based on {base_swr_30yr*100:.1f}% SWR.",
-            sub_value=f"(${traditional_annual_income/12:,.0f}/mo)"
-        )
+            # Traditional Pot
+            render_card(
+                c4, 
+                f"Nest Egg", 
+                f"${traditional_balance_display:,.0f}", 
+                "Projected balance."
+            )
+            
+            # Traditional Income
+            render_card(
+                c5, 
+                f"Future Income", 
+                f"${traditional_annual_income:,.0f}", 
+                f"Per year safe draw.",
+                sub_value=f"(${traditional_annual_income/12:,.0f}/mo)"
+            )
 
 
     # --- MAIN VISUALIZATION CONTROLS & LAYOUT ---
     
-    st.markdown("---")
+    # Use st.markdown to create a small vertical spacer instead of "---" if needed
+    st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
     
     viz_col, control_col = st.columns([3, 1])
     
@@ -969,9 +981,9 @@ def main():
             if y < len(df_income):
                 val_from_table = df_income.loc[y, "IncomeRealAfterTax"]
                 if show_real and infl_rate > 0:
-                      val_nominal = val_from_table * ((1 + infl_rate) ** y)
+                       val_nominal = val_from_table * ((1 + infl_rate) ** y)
                 else:
-                      val_nominal = val_from_table
+                       val_nominal = val_from_table
                 
                 detailed_income_active.append(val_nominal)
             else:
@@ -1070,13 +1082,13 @@ def main():
         
         fig.update_layout(
             # UPDATED TITLE SIZE AND BOLDNESS
-            title=dict(text="<b>Net Worth Projection</b>", font=dict(size=24)),
+            title=dict(text="<b>Net Worth Projection</b>", font=dict(size=20)),
             xaxis_title="Age", yaxis_title="Value ($)",
             barmode='stack',
             hovermode="x unified",
             legend=dict(orientation="h", y=1.02, x=0.01),
-            margin=dict(l=20, r=20, t=60, b=20),
-            height=400,
+            margin=dict(l=20, r=20, t=40, b=20),
+            height=380, # Slightly smaller height to ensure fit
             yaxis=dict(tickformat=",.0f")
         )
         
@@ -1221,4 +1233,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
