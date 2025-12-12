@@ -1371,13 +1371,15 @@ def main():
         Note: The **StartBalance** of the next row (Age + 1) equals the **EndBalance** of the current row.
         """)
         
-        # Add Total Expenses Column for transparency (Sum of withdrawal components)
-        df_p["TotalExpenses"] = (
+        # Add Total Spending Column (Portfolio Draws + Active Income Used)
+        # This reflects the total lifestyle cost (Spending).
+        df_p["TotalSpending"] = (
             df_p["LivingWithdrawal"] + 
             df_p["TaxPenalty"] + 
             df_p["KidCost"] + 
             df_p["CarCost"] + 
-            df_p["HomeCost"]
+            df_p["HomeCost"] + 
+            df_p["ScenarioActiveIncome"]
         )
 
         format_dict_d = {
@@ -1392,7 +1394,7 @@ def main():
             "ScenarioActiveIncome": "${:,.0f}",
             "InvestGrowthYear": "${:,.0f}",
             "ContribYear": "${:,.0f}",
-            "TotalExpenses": "${:,.0f}",
+            "TotalSpending": "${:,.0f}",
             "AnnualRate": "{:.2%}",
             "Age": "{:.0f}"
         }
@@ -1406,7 +1408,7 @@ def main():
             "ContribYear", 
             # "TotalPortfolioDraw", # Removed to reduce clutter in favor of itemized list
             "EndBalance",
-            "TotalExpenses",
+            "TotalSpending",
             "LivingWithdrawal", 
             "TaxPenalty", 
             "KidCost", 
