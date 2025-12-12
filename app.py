@@ -968,7 +968,21 @@ def main():
             # But 'annual_expense_chart' tracks EXTRA expenses (kids/homes).
             # We'll just log 0 for portfolio draw in accumulation phase
             det_total_portfolio_draw.append(annual_expense_chart[y]) # Just the extra expenses
-            detailed_income_active.append(0.0) 
+            
+            # SHOW ACTIVE INCOME: Retrieve from income DF so chart isn't empty
+            if y < len(df_income):
+                val_from_table = df_income.loc[y, "IncomeRealAfterTax"]
+                # If show_real is True, val_from_table is Real. The chart logic below expects Nominal 
+                # because it applies the deflation math at the very end (lines ~800).
+                if show_real and infl_rate > 0:
+                     val_nominal = val_from_table * ((1 + infl_rate) ** y)
+                else:
+                     val_nominal = val_from_table
+                
+                detailed_income_active.append(val_nominal)
+            else:
+                detailed_income_active.append(0.0)
+                
             detailed_expense_total.append(annual_expense_chart[y])
             det_living_withdrawal.append(0.0)
             det_tax_penalty.append(0.0)
