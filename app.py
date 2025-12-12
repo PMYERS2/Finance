@@ -1190,36 +1190,72 @@ def main():
         with c1:
             st.markdown("**Income vs Expenses (Scenario)**")
             
-            # --- CUSTOM LOGIC FOR GRAPH EXPENSES ---
-            # We reconstruct the expense line based on the SCENARIO (Work vs Barista vs Early),
-            # not just the static 'Work' schedule in df_income.
+            # --- CUSTOM LOGIC FOR GRAPH INCOME & EXPENSES ---
+            # We reconstruct the lines based on the SCENARIO (Work vs Barista vs Early),
+            # ensuring Barista income is treated as Pre-Tax.
             
             base_expenses_plot = []
+            graph_gross_income = []
+            graph_net_income = []
             
-            # Reconstruct Base Living Expenses aligned with Scenario Timeline
             for i, row in df_chart.iterrows():
                 age = row["Age"]
                 idx = int(row["Year"] - 1) # 0-based index
                 
+                # Inflation factor for manual adjustments if needed (Nominal conversion)
+                infl_factor_nominal = (1 + infl_rate) ** idx
+                
+                # --- 1. INCOME LOGIC ---
+                if age < stop_age:
+                    # WORKING PHASE
+                    if idx < len(df_income):
+                        # df_income cols are already adjusted for show_real/nominal preference
+                        g_val = df_income.loc[idx, "IncomeRealBeforeTax"]
+                        n_val = df_income.loc[idx, "IncomeRealAfterTax"]
+                        graph_gross_income.append(g_val)
+                        graph_net_income.append(n_val)
+                    else:
+                        graph_gross_income.append(0.0)
+                        graph_net_income.append(0.0)
+                        
+                elif is_barista and age < barista_until_age:
+                    # BARISTA PHASE
+                    # User input 'barista_income_today' is treated as PRE-TAX Real (Today's $)
+                    
+                    gross_real = barista_income_today
+                    tax_real = total_tax_on_earned(gross_real, state_tax_rate)
+                    net_real = max(0, gross_real - tax_real)
+                    
+                    if show_real and infl_rate > 0:
+                        graph_gross_income.append(gross_real)
+                        graph_net_income.append(net_real)
+                    else:
+                        graph_gross_income.append(gross_real * infl_factor_nominal)
+                        graph_net_income.append(net_real * infl_factor_nominal)
+                        
+                else:
+                    # FULL RETIREMENT PHASE
+                    graph_gross_income.append(0.0)
+                    graph_net_income.append(0.0)
+
+                # --- 2. EXPENSE LOGIC ---
                 if age < stop_age:
                     # Working Phase: Expense grows from 'Current Expenses'
-                    # Calculate Nominal first
-                    val_nom = expense_today * ((1 + expense_growth_rate) ** idx) * ((1 + infl_rate) ** idx)
+                    val_nom = expense_today * ((1 + expense_growth_rate) ** idx) * infl_factor_nominal
                     base_expenses_plot.append(val_nom)
                 else:
                     # Retirement/Barista Phase: Expense is 'Retirement Spend' Target
-                    # (This reflects the lifestyle change implied by hitting the FIRE number)
-                    val_nom = fi_annual_spend_today * ((1 + infl_rate) ** idx)
+                    val_nom = fi_annual_spend_today * infl_factor_nominal
                     base_expenses_plot.append(val_nom)
             
+            # --- PREPARE PLOTTING DATA ---
             s_base_expenses = pd.Series(base_expenses_plot)
             
-            # Adjust for Real/Nominal settings (using the DF column created in main)
+            # Adjust Expenses for Real/Nominal settings (using the DF column created in main)
             if show_real and infl_rate > 0:
                 s_base_expenses /= df_chart["DF"]
                 
             # Add Lumpy Expenses (Kid, Car, Home) to the Base
-            # These columns in df_chart are already adjusted for Real/Nominal
             total_scenario_expenses = (
                 s_base_expenses + 
                 df_chart["KidCost"] + 
@@ -1228,18 +1264,28 @@ def main():
                 df_chart["TaxPenalty"]
             )
             
-            # Slice to match the plotting range (plot_end is calculated in main)
+            # Slice to match the plotting range
             df_p_graph = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
+            y_gross = graph_gross_income[:len(df_p_graph)]
+            y_net = graph_net_income[:len(df_p_graph)]
             y_expenses = total_scenario_expenses[:len(df_p_graph)]
-            y_income = df_p_graph["ScenarioActiveIncome"]
             
             fig_i = go.Figure()
             
-            # Income Line
+            # Gross Income Line
             fig_i.add_trace(go.Scatter(
                 x=df_p_graph["Age"], 
-                y=y_income, 
-                name="Active Income (Net)", 
+                y=y_gross, 
+                name="Gross Income", 
+                line=dict(color="#B0BEC5", dash="dot", width=2), 
+                hovertemplate="$%{y:,.0f}"
+            ))
+            
+            # Net Income Line
+            fig_i.add_trace(go.Scatter(
+                x=df_p_graph["Age"], 
+                y=y_net, 
+                name="Net Income", 
                 line=dict(color="#66BB6A", width=3), 
                 hovertemplate="$%{y:,.0f}"
             ))
