@@ -1188,41 +1188,83 @@ def main():
     with tab2:
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("**Income vs Expenses (Real)**")
+            st.markdown("**Income vs Expenses (Scenario)**")
             
             # --- CUSTOM LOGIC FOR GRAPH EXPENSES ---
-            # df_income has the smooth expenses. 
-            # We want to add the lumpy expenses from df_chart (KidCost, CarCost, etc) to it.
-            # 1. Slice df_chart to match df_income length
-            limit = len(df_income)
-            lumpy_expenses = (
-                df_chart.loc[:limit-1, "KidCost"] + 
-                df_chart.loc[:limit-1, "CarCost"] + 
-                df_chart.loc[:limit-1, "HomeCost"] + 
-                df_chart.loc[:limit-1, "TaxPenalty"]
-            ).fillna(0.0)
+            # We reconstruct the expense line based on the SCENARIO (Work vs Barista vs Early),
+            # not just the static 'Work' schedule in df_income.
             
-            # 2. Add to base real expenses
-            # Note: df_income["ExpensesReal"] is already adjusted for inflation logic (Real vs Nominal)
-            # df_chart columns are also adjusted at the end of the script using "DF".
-            # So we can just add them directly.
-            total_real_expenses_for_graph = df_income["ExpensesReal"] + lumpy_expenses
+            base_expenses_plot = []
+            
+            # Reconstruct Base Living Expenses aligned with Scenario Timeline
+            for i, row in df_chart.iterrows():
+                age = row["Age"]
+                idx = int(row["Year"] - 1) # 0-based index
+                
+                if age < stop_age:
+                    # Working Phase: Expense grows from 'Current Expenses'
+                    # Calculate Nominal first
+                    val_nom = expense_today * ((1 + expense_growth_rate) ** idx) * ((1 + infl_rate) ** idx)
+                    base_expenses_plot.append(val_nom)
+                else:
+                    # Retirement/Barista Phase: Expense is 'Retirement Spend' Target
+                    # (This reflects the lifestyle change implied by hitting the FIRE number)
+                    val_nom = fi_annual_spend_today * ((1 + infl_rate) ** idx)
+                    base_expenses_plot.append(val_nom)
+            
+            s_base_expenses = pd.Series(base_expenses_plot)
+            
+            # Adjust for Real/Nominal settings (using the DF column created in main)
+            if show_real and infl_rate > 0:
+                s_base_expenses /= df_chart["DF"]
+                
+            # Add Lumpy Expenses (Kid, Car, Home) to the Base
+            # These columns in df_chart are already adjusted for Real/Nominal
+            total_scenario_expenses = (
+                s_base_expenses + 
+                df_chart["KidCost"] + 
+                df_chart["CarCost"] + 
+                df_chart["HomeCost"] + 
+                df_chart["TaxPenalty"]
+            )
+            
+            # Slice to match the plotting range (plot_end is calculated in main)
+            df_p_graph = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
+            y_expenses = total_scenario_expenses[:len(df_p_graph)]
+            y_income = df_p_graph["ScenarioActiveIncome"]
             
             fig_i = go.Figure()
-            fig_i.add_trace(go.Scatter(x=df_income["Age"], y=df_income["IncomeRealBeforeTax"], name="Gross Income", line=dict(color="#90A4AE", dash="dot"), hovertemplate="$%{y:,.0f}"))
-            fig_i.add_trace(go.Scatter(x=df_income["Age"], y=df_income["IncomeRealAfterTax"], name="Net Income", line=dict(color="#66BB6A"), hovertemplate="$%{y:,.0f}"))
             
-            # UPDATED: Use the new total expense series
+            # Income Line
             fig_i.add_trace(go.Scatter(
-                x=df_income["Age"], 
-                y=total_real_expenses_for_graph, 
-                name="Total Expenses", 
-                line=dict(color="#EF5350"), 
+                x=df_p_graph["Age"], 
+                y=y_income, 
+                name="Active Income (Net)", 
+                line=dict(color="#66BB6A", width=3), 
                 hovertemplate="$%{y:,.0f}"
             ))
             
-            fig_i.update_layout(height=250, margin=dict(t=20, b=20, l=20, r=20), yaxis=dict(tickformat=",.0f"))
+            # Expense Line
+            fig_i.add_trace(go.Scatter(
+                x=df_p_graph["Age"], 
+                y=y_expenses, 
+                name="Total Spending", 
+                line=dict(color="#EF5350", width=3), 
+                hovertemplate="$%{y:,.0f}"
+            ))
+            
+            # Visual marker for Barista/Retirement transition
+            if stop_age < plot_end:
+                 fig_i.add_vline(x=stop_age, line_width=1, line_dash="dash", line_color="grey")
+
+            fig_i.update_layout(
+                height=300, 
+                margin=dict(t=30, b=20, l=20, r=20), 
+                yaxis=dict(tickformat=",.0f"),
+                legend=dict(orientation="h", y=1.1, x=0)
+            )
             st.plotly_chart(fig_i, use_container_width=True)
+            
         with c2:
             st.markdown("**Investment Returns Glide Path**")
             fig_r = go.Figure()
@@ -1231,11 +1273,14 @@ def main():
             fig_r.update_layout(height=250, margin=dict(t=20, b=20, l=20, r=20), yaxis_title="% Return", yaxis=dict(tickformat=".1f"))
             st.plotly_chart(fig_r, use_container_width=True)
 
-        st.markdown("**Savings Rate Over Time**")
+        st.markdown("**Savings Rate (Accumulation Phase)**")
+        # Keep original savings rate chart but limit to working years to avoid confusion
+        df_savings_plot = df_income[df_income["Age"] < stop_age]
+        
         fig_s = go.Figure()
         fig_s.add_trace(go.Scatter(
-            x=df_income["Age"], 
-            y=df_income["SavingsRate"] * 100, 
+            x=df_savings_plot["Age"], 
+            y=df_savings_plot["SavingsRate"] * 100, 
             mode='lines', 
             name="Savings Rate", 
             line=dict(color="#42A5F5"),
