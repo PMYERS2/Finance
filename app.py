@@ -100,258 +100,145 @@ def compound_schedule(
 # FI Simulation Helpers
 # =========================================================
 
-def simulate_period_exact(
-    start_balance_nominal,
-    start_age,
-    end_age,
-    current_age,
-    annual_rates_full,
-    annual_expense_real,
-    monthly_contrib_real,
-    infl_rate,
-    tax_rate=0.0,
-    early_withdrawal_tax_rate=0.0,
-    use_yearly_compounding=False
-):
-    balance = start_balance_nominal
-    
-    # Loop simulates years passing.
-    # If start_age=50 and end_age=60, we simulate 10 years of growth.
-    # The result 'balance' is the End-of-Year balance of the final year.
-    # End-of-Year 59 is effectively Start-of-Year 60.
-    for age in range(start_age, end_age):
-        year_idx = age - current_age
-        
-        if year_idx < 0 or year_idx >= len(annual_rates_full):
-            break
-            
-        r_nominal = annual_rates_full[year_idx]
-        
-        years_from_now = year_idx + 1 
-        infl_factor = (1 + infl_rate) ** years_from_now
-        
-        # 1. Income / Contributions
-        contrib_nominal = monthly_contrib_real * infl_factor
-        
-        # 2. Base Expense Calculation
-        base_expense_nominal = annual_expense_real * infl_factor
-        if tax_rate > 0:
-            base_expense_nominal = base_expense_nominal / (1.0 - tax_rate)
+# Helper to calculate Nominal Target for a specific year
+def get_nominal_target(real_target, years_passed, infl_rate):
+    return real_target * ((1 + infl_rate) ** years_passed)
 
-        # 3. Net Draw Needed
-        net_draw_nominal = base_expense_nominal
-        
-        # 4. Early Withdrawal Penalty Logic (Age < 60)
-        final_withdrawal_nominal = 0.0
-        
-        if net_draw_nominal > 0:
-            if age < 60 and early_withdrawal_tax_rate > 0:
-                final_withdrawal_nominal = net_draw_nominal / (1.0 - early_withdrawal_tax_rate)
-            else:
-                final_withdrawal_nominal = net_draw_nominal
-        else:
-            final_withdrawal_nominal = net_draw_nominal 
-
-        if use_yearly_compounding:
-            growth = balance * r_nominal
-            balance += growth
-            balance += (contrib_nominal * 12.0)
-            balance -= final_withdrawal_nominal
-        else:
-            monthly_rate = r_nominal / 12.0
-            for _ in range(12):
-                balance += contrib_nominal
-                balance += balance * monthly_rate
-            balance -= final_withdrawal_nominal
-        
-        if balance < 0:
-            balance = 0.0
-            break
-            
-    return balance
-
-def compute_bridge_age(
-    df_full,
-    current_age,
-    retirement_age,
-    start_balance_input,
-    annual_rates_by_year_full,
-    infl_rate,
-    show_real,
-    withdrawal_needed_real,
-    terminal_target_real_at_60,
-    early_withdrawal_tax_rate,
-    use_yearly_compounding
-):
-    # 1. Map Age -> Nominal Start-of-Year Balance
-    # We use StartBalance because the user wants to know:
-    # "At the start of Age X, do I have enough?"
-    balance_nominal_by_age = {}
-    
-    # Initial state
-    balance_nominal_by_age[current_age] = start_balance_input 
-
-    for row in df_full.itertuples():
-        age = row.Age
-        # Use StartBalance from the dataframe row
-        bal_nom = row.StartBalance 
-        balance_nominal_by_age[age] = bal_nom
-        
-    # Also map the very next year (End of final row) to handle edge cases
-    last_row = df_full.iloc[-1]
-    balance_nominal_by_age[last_row.Age + 1] = last_row.EndBalance
-
-    # 2. Determine Nominal Target at 60
-    years_to_ret = retirement_age - current_age
-    infl_factor_at_ret = (1 + infl_rate) ** years_to_ret
-    
-    target_nominal_at_60 = terminal_target_real_at_60 * infl_factor_at_ret
-    
-    start_age_candidate = current_age + 1
-    
-    for age0 in range(start_age_candidate, retirement_age + 1):
-        if age0 not in balance_nominal_by_age:
-            continue
-            
-        # "Start Balance" at age0 is the pot of money we have on that birthday
-        start_bal = balance_nominal_by_age[age0]
-        
-        # Simulate from Start of age0 to Start of Age 60 (retirement_age in this context is just the cap)
-        # Actually, simulate_period_exact goes from start_age to end_age.
-        # If we retire at 50, we need to bridge to 60.
-        
-        proj_bal_at_60_nominal = simulate_period_exact(
-            start_balance_nominal=start_bal,
-            start_age=age0,
-            end_age=retirement_age, # In this specific function usage, retirement_age is acting as Age 60/Access Age
-            current_age=current_age,
-            annual_rates_full=annual_rates_by_year_full,
-            annual_expense_real=withdrawal_needed_real,
-            monthly_contrib_real=0.0,
-            infl_rate=infl_rate,
-            tax_rate=0.0,
-            early_withdrawal_tax_rate=early_withdrawal_tax_rate,
-            use_yearly_compounding=use_yearly_compounding
-        )
-
-        if proj_bal_at_60_nominal >= target_nominal_at_60:
-            final_real_bal = proj_bal_at_60_nominal / infl_factor_at_ret
-            return age0, final_real_bal
-            
-    return None, None
-
-
-def compute_coast_fi_age(
-    df_full, current_age, start_balance_input, fi_annual_spend_today,
-    infl_rate, show_real, base_30yr_swr, retirement_age, annual_rates_by_year_full,
-    early_withdrawal_tax_rate, use_yearly_compounding
-):
-    if fi_annual_spend_today <= 0 or base_30yr_swr <= 0 or df_full is None:
-        return None, None, None, None
-        
-    target_at_60 = fi_annual_spend_today / base_30yr_swr
-    
-    # We bridge to Age 60 (Standard retirement access age for this logic)
-    access_age = 60
-    
-    age, bal = compute_bridge_age(
-        df_full, current_age, access_age, start_balance_input, annual_rates_by_year_full,
-        infl_rate, show_real, 0.0, target_at_60,
-        early_withdrawal_tax_rate, use_yearly_compounding
-    )
-    
-    return age, bal, target_at_60, base_30yr_swr
-
+def get_dynamic_swr(age, base_swr):
+    """
+    Adjust SWR based on retirement horizon.
+    Earlier retirement = Longer horizon = Lower SWR needed.
+    """
+    if age >= 60:
+        return base_swr
+    elif age >= 50:
+        # e.g., 4.0% -> 3.75%
+        return max(0.01, base_swr - 0.0025)
+    elif age >= 40:
+        # e.g., 4.0% -> 3.50%
+        return max(0.01, base_swr - 0.0050)
+    else:
+        # e.g., 4.0% -> 3.25%
+        return max(0.01, base_swr - 0.0075)
 
 def compute_regular_fi_age(
     df_full, current_age, start_balance_input, fi_annual_spend_today,
-    infl_rate, show_real, base_swr, retirement_age, annual_rates_by_year_full,
-    early_withdrawal_tax_rate, use_yearly_compounding
+    infl_rate, base_swr
 ):
     if fi_annual_spend_today <= 0 or base_swr <= 0 or df_full is None:
         return None, None
         
-    # Calculated Real Target (e.g. $60k / 0.04 = $1.5M)
-    target_real_needed = fi_annual_spend_today / base_swr
+    final_target_real = 0.0
     
-    # Map Age -> Nominal Start-of-Year Balance (Working Scenario)
-    balance_nominal_by_age = {}
-    balance_nominal_by_age[current_age] = start_balance_input 
+    # Iterate and find first crossover using Dynamic SWR
     for row in df_full.itertuples():
-        balance_nominal_by_age[row.Age] = row.StartBalance
-    last_row = df_full.iloc[-1]
-    balance_nominal_by_age[last_row.Age + 1] = last_row.EndBalance
-
-    # Access age for bridging (Standard penalty-free age)
-    access_age = 60
-
-    # Iterate from next year until retirement age
-    start_age_candidate = current_age + 1
-    for age in range(start_age_candidate, retirement_age + 1):
-        if age not in balance_nominal_by_age: continue
+        age = row.Age
         
-        start_bal = balance_nominal_by_age[age]
+        # Determine SWR for this specific age
+        current_swr = get_dynamic_swr(age, base_swr)
         
-        # --- CHECK 1: HIT THE NUMBER (TODAY) ---
-        # "Do I have enough money in the account right now?"
+        # Calculate Target for this specific age
+        target_real_at_age = fi_annual_spend_today / current_swr
+        
         years_passed = age - current_age
-        target_nominal_today = target_real_needed * ((1 + infl_rate) ** years_passed)
         
-        if start_bal < target_nominal_today:
-            # We fail Gate 1: We haven't saved enough yet.
-            continue
+        # Nominal Target for this specific year
+        target_nominal = get_nominal_target(target_real_at_age, years_passed, infl_rate)
+        
+        if row.StartBalance >= target_nominal:
+            return age, target_real_at_age
             
-        # --- CHECK 2: SURVIVE THE BRIDGE (FUTURE) ---
-        # "If I quit now, will I still have the target amount at Age 60?"
-        # This handles early withdrawal penalties, drag, etc.
-        
-        bridge_end_age = max(age, access_age)
-        years_to_bridge = bridge_end_age - current_age
-        target_nominal_at_bridge_end = target_real_needed * ((1 + infl_rate) ** years_to_bridge)
-        
-        proj_bal_at_bridge_end = simulate_period_exact(
-            start_balance_nominal=start_bal,
-            start_age=age,
-            end_age=bridge_end_age,
-            current_age=current_age,
-            annual_rates_full=annual_rates_by_year_full,
-            annual_expense_real=fi_annual_spend_today, # Withdraw full spend
-            monthly_contrib_real=0.0, # Stop contributing
-            infl_rate=infl_rate,
-            tax_rate=0.0,
-            early_withdrawal_tax_rate=early_withdrawal_tax_rate,
-            use_yearly_compounding=use_yearly_compounding
-        )
-        
-        if proj_bal_at_bridge_end >= target_nominal_at_bridge_end:
-            # We passed both checks.
-            return age, target_real_needed
-
-    return None, target_real_needed
-
+    # If not found, return the target implied by the last age checked (usually 90)
+    # or just the standard target. Let's return the standard 4% target for display fallback.
+    return None, fi_annual_spend_today / base_swr
 
 def compute_barista_fi_age(
     df_full, current_age, start_balance_input, fi_annual_spend_today, barista_income_today,
-    infl_rate, show_real, base_swr, retirement_age, annual_rates_by_year_full,
-    early_withdrawal_tax_rate, use_yearly_compounding
+    infl_rate, base_swr
 ):
+    # Barista FIRE Definition:
+    # You have enough invested such that specific Withdrawal Rate covers the GAP.
+    # Gap = Expenses - BaristaIncome.
+    
     gap = max(0, fi_annual_spend_today - barista_income_today)
+    
     if gap == 0:
         return current_age, 0 
         
     if base_swr <= 0 or df_full is None:
         return None, None
 
-    target_at_60 = fi_annual_spend_today / base_swr
-    access_age = 60
+    final_target_real = 0.0
     
-    age, bal = compute_bridge_age(
-        df_full, current_age, access_age, start_balance_input, annual_rates_by_year_full,
-        infl_rate, show_real, gap, target_at_60,
-        early_withdrawal_tax_rate, use_yearly_compounding
-    )
+    for row in df_full.itertuples():
+        age = row.Age
+        
+        # Determine SWR for this specific age
+        current_swr = get_dynamic_swr(age, base_swr)
+        
+        # Calculate Target for the GAP
+        target_real_gap = gap / current_swr
+        
+        years_passed = age - current_age
+        
+        target_nominal = get_nominal_target(target_real_gap, years_passed, infl_rate)
+        
+        if row.StartBalance >= target_nominal:
+            return age, target_real_gap
+            
+    return None, gap / base_swr
+
+def compute_coast_fi_age(
+    df_full, current_age, start_balance_input, fi_annual_spend_today,
+    infl_rate, base_swr, retirement_age, annual_rates_by_year_full
+):
+    # Coast FIRE Definition:
+    # If I stop contributing NOW, will my current balance grow to hit my FI Number by Age 60 (or Retirement Age)?
     
-    return age, target_at_60
+    if fi_annual_spend_today <= 0 or base_swr <= 0 or df_full is None:
+        return None, None, None, None
+        
+    target_real = fi_annual_spend_today / base_swr
+    target_access_age = 60 # Standard FIRE access
+    years_to_access = target_access_age - current_age
+    
+    # Target Nominal at Age 60
+    target_nominal_at_60 = target_real * ((1 + infl_rate) ** years_to_access)
+    
+    # Map Age -> Nominal Start Balance (from Working Scenario)
+    balance_map = {row.Age: row.StartBalance for row in df_full.itertuples()}
+    balance_map[current_age] = start_balance_input
+    
+    for age in range(current_age, retirement_age + 1):
+        if age not in balance_map: continue
+        
+        start_bal = balance_map[age]
+        
+        # Simulate purely purely growth (no contribs, no draws) from 'age' to '60'
+        # We assume Coast means you cover expenses with active income, so net draw is 0.
+        
+        sim_years = target_access_age - age
+        if sim_years <= 0:
+            # We are past 60. Check if we hit it.
+            if start_bal >= target_nominal_at_60: # Actually this check is complex if infl continues. Simplified:
+                return age, start_bal, target_real, base_swr
+            continue
+
+        # Simple Compounding for simulation to check Coast
+        # Using average rate roughly or iterating annual rates
+        
+        bal_sim = start_bal
+        for k in range(sim_years):
+            # year index in global array
+            y_idx = (age - current_age) + k
+            if y_idx < len(annual_rates_by_year_full):
+                r = annual_rates_by_year_full[y_idx]
+                bal_sim *= (1 + r)
+        
+        if bal_sim >= target_nominal_at_60:
+            return age, start_bal, target_real, base_swr
+            
+    return None, None, None, None
 
 
 # =========================================================
@@ -822,18 +709,15 @@ def main():
     # These functions now use StartBalance internally via the lookup map
     coast_age, _, _, _ = compute_coast_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, 
-        infl_rate, show_real, base_swr_30yr, retirement_age, annual_rates_by_year_full,
-        early_withdrawal_tax_rate, use_yearly
+        infl_rate, base_swr_30yr, retirement_age, annual_rates_by_year_full
     )
     fi_age_regular, fi_target_bal = compute_regular_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, 
-        infl_rate, show_real, base_swr_30yr, retirement_age, annual_rates_by_year_full,
-        early_withdrawal_tax_rate, use_yearly
+        infl_rate, base_swr_30yr
     )
     barista_age, _ = compute_barista_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, barista_income_today, 
-        infl_rate, show_real, base_swr_30yr, retirement_age, annual_rates_by_year_full,
-        early_withdrawal_tax_rate, use_yearly
+        infl_rate, base_swr_30yr
     )
 
     # --- EXTRA KPI: TRADITIONAL RETIREMENT OUTCOME ---
