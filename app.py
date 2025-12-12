@@ -461,7 +461,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # Description of purpose
-    st.markdown("### Purpose of report: Forecast net worth overtime or estimate retirement age.")
+    st.markdown("##### Purpose of report: Forecast net worth overtime or estimate retirement age.")
     
     show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
 
@@ -1221,3 +1221,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
