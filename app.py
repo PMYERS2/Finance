@@ -100,6 +100,74 @@ def compound_schedule(
 # FI Simulation Helpers
 # =========================================================
 
+def simulate_period_exact(
+    start_balance_nominal,
+    start_age,
+    end_age,
+    current_age,
+    annual_rates_full,
+    annual_expense_real,
+    monthly_contrib_real,
+    infl_rate,
+    tax_rate=0.0,
+    early_withdrawal_tax_rate=0.0,
+    use_yearly_compounding=False
+):
+    balance = start_balance_nominal
+    
+    # Loop simulates years passing.
+    # If start_age=50 and end_age=60, we simulate 10 years of growth.
+    # The result 'balance' is the End-of-Year balance of the final year.
+    # End-of-Year 59 is effectively Start-of-Year 60.
+    for age in range(start_age, end_age):
+        year_idx = age - current_age
+        
+        if year_idx < 0 or year_idx >= len(annual_rates_full):
+            break
+            
+        r_nominal = annual_rates_full[year_idx]
+        
+        years_from_now = year_idx + 1 
+        infl_factor = (1 + infl_rate) ** years_from_now
+        
+        # 1. Income / Contributions
+        contrib_nominal = monthly_contrib_real * infl_factor
+        
+        # 2. Base Expense Calculation
+        base_expense_nominal = annual_expense_real * infl_factor
+        if tax_rate > 0:
+            base_expense_nominal = base_expense_nominal / (1.0 - tax_rate)
+
+        # 3. Net Draw Needed
+        net_draw_nominal = base_expense_nominal
+        
+        # 4. Early Withdrawal Penalty Logic (Age < 60)
+        final_withdrawal_nominal = 0.0
+        
+        if net_draw_nominal > 0:
+            if age < 60 and early_withdrawal_tax_rate > 0:
+                final_withdrawal_nominal = net_draw_nominal / (1.0 - early_withdrawal_tax_rate)
+            else:
+                final_withdrawal_nominal = net_draw_nominal 
+
+        if use_yearly_compounding:
+            growth = balance * r_nominal
+            balance += growth
+            balance += (contrib_nominal * 12.0)
+            balance -= final_withdrawal_nominal
+        else:
+            monthly_rate = r_nominal / 12.0
+            for _ in range(12):
+                balance += contrib_nominal
+                balance += balance * monthly_rate
+            balance -= final_withdrawal_nominal
+        
+        if balance < 0:
+            balance = 0.0
+            break
+            
+    return balance
+
 # Helper to calculate Nominal Target for a specific year
 def get_nominal_target(real_target, years_passed, infl_rate):
     return real_target * ((1 + infl_rate) ** years_passed)
@@ -154,39 +222,60 @@ def compute_regular_fi_age(
 
 def compute_barista_fi_age(
     df_full, current_age, start_balance_input, fi_annual_spend_today, barista_income_today,
-    infl_rate, base_swr
+    infl_rate, base_swr, barista_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly_compounding
 ):
-    # Barista FIRE Definition:
-    # You have enough invested such that specific Withdrawal Rate covers the GAP.
-    # Gap = Expenses - BaristaIncome.
+    # Updated Barista FIRE Definition:
+    # 1. Start Barista Job at Age X.
+    # 2. Withdraw (Expenses - Barista Income) annually from Age X to 'barista_until_age'.
+    # 3. CRITICAL: At 'barista_until_age', the remaining balance MUST equal the Full FI Number 
+    #    (Expenses / SWR_at_that_age).
     
     gap = max(0, fi_annual_spend_today - barista_income_today)
     
-    if gap == 0:
+    if gap == 0 and barista_income_today >= fi_annual_spend_today:
         return current_age, 0 
         
     if base_swr <= 0 or df_full is None:
         return None, None
 
-    final_target_real = 0.0
+    # Calculate the Target we need to hit at the END of the Barista Phase (e.g. at 60)
+    final_swr = get_dynamic_swr(barista_until_age, base_swr)
+    target_real_at_finish = fi_annual_spend_today / final_swr
     
-    for row in df_full.itertuples():
-        age = row.Age
+    # Map start balances
+    balance_map = {row.Age: row.StartBalance for row in df_full.itertuples()}
+    balance_map[current_age] = start_balance_input
+    
+    # We iterate through candidate start ages
+    for age in range(current_age + 1, barista_until_age + 1):
+        if age not in balance_map: continue
         
-        # Determine SWR for this specific age
-        current_swr = get_dynamic_swr(age, base_swr)
+        start_bal = balance_map[age]
         
-        # Calculate Target for the GAP
-        target_real_gap = gap / current_swr
+        # Determine the target in Nominal terms at the finish line
+        years_total_horizon = barista_until_age - current_age
+        target_nominal_finish = target_real_at_finish * ((1 + infl_rate) ** years_total_horizon)
         
-        years_passed = age - current_age
+        # Simulate the bridge period (Barista phase)
+        # We withdraw ONLY the gap. Contributions are 0 (assuming Barista covers living + gap draw)
+        final_bal = simulate_period_exact(
+            start_balance_nominal=start_bal,
+            start_age=age,
+            end_age=barista_until_age,
+            current_age=current_age,
+            annual_rates_full=annual_rates_by_year_full,
+            annual_expense_real=gap, # Withdrawal is just the gap
+            monthly_contrib_real=0.0,
+            infl_rate=infl_rate,
+            tax_rate=0.0, # Simplified
+            early_withdrawal_tax_rate=early_withdrawal_tax_rate,
+            use_yearly_compounding=use_yearly_compounding
+        )
         
-        target_nominal = get_nominal_target(target_real_gap, years_passed, infl_rate)
-        
-        if row.StartBalance >= target_nominal:
-            return age, target_real_gap
+        if final_bal >= target_nominal_finish:
+            return age, target_real_at_finish # Return the Full Target they hit at the end
             
-    return None, gap / base_swr
+    return None, target_real_at_finish
 
 def compute_coast_fi_age(
     df_full, current_age, start_balance_input, fi_annual_spend_today,
@@ -476,6 +565,7 @@ def main():
         
         fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
         barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
+        barista_until_age = st.number_input("Work Barista Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
 
     # 3. Assets & Housing (Reordered Third)
     with st.sidebar.expander("3. Assets & Housing", expanded=True):
@@ -717,7 +807,7 @@ def main():
     )
     barista_age, _ = compute_barista_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, barista_income_today, 
-        infl_rate, base_swr_30yr
+        infl_rate, base_swr_30yr, barista_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly
     )
 
     # --- EXTRA KPI: TRADITIONAL RETIREMENT OUTCOME ---
@@ -790,8 +880,8 @@ def main():
             val_bar = str(barista_age) if barista_age else "N/A"
             color_bar = "#0D47A1" if barista_age else "#CC0000"
             if barista_age:
-                swr_b = get_dynamic_swr(barista_age, base_swr_30yr)
-                desc_bar = f"Switch to ${barista_income_today/1000:.0f}k job. Gap SWR: {swr_b*100:.2f}%"
+                # swr_b is determined by the end age usually, but for display:
+                desc_bar = f"Switch to ${barista_income_today/1000:.0f}k job until age {barista_until_age}."
             else:
                 desc_bar = "N/A"
             render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", desc_bar)
@@ -908,10 +998,12 @@ def main():
         # 2. Retirement Phase Expenses
         if age >= stop_age:
             if is_barista:
-                 if age < retirement_age:
+                 if age < barista_until_age:
+                     # BARISTA PHASE
                      active_income_this_year = barista_income_today
                      base_need = max(0, fi_annual_spend_today - barista_income_today) * ((1+infl_rate)**(y+1))
                  else:
+                     # FULL RETIREMENT PHASE (After Barista)
                      base_need = fi_annual_spend_today * ((1+infl_rate)**(y+1))
                      active_income_this_year = 0.0
             elif is_early:
