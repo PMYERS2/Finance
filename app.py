@@ -30,12 +30,16 @@ def compound_schedule(
         else:
             r = annual_rate if annual_rate is not None else 0.0
 
+        # --- START OF YEAR SNAPSHOT ---
+        # This is the balance available on Day 1 of the year
         balance_start_year = balance
+        
         contrib_year = 0.0
         growth_year_sum = 0.0
 
         if use_yearly_compounding:
             # --- YEARLY COMPOUNDING LOGIC ---
+            # Growth based on start balance
             growth_year_sum = balance * r
             balance += growth_year_sum
             
@@ -47,6 +51,8 @@ def compound_schedule(
             cum_contrib += annual_contrib
         else:
             # --- MONTHLY COMPOUNDING LOGIC ---
+            # We assume contributions happen during the year, but we still track
+            # start balance as the anchor.
             m = 12
             for _ in range(m):
                 monthly_contrib = monthly_contrib_by_year[year_idx]
@@ -61,17 +67,20 @@ def compound_schedule(
         balance_before_expense = balance
         annual_expense = annual_expense_by_year[year_idx]
 
-        # Deduct Annual Expense at Year End
+        # Deduct Annual Expense at Year End (or throughout, simplified here as net deduction)
         balance = balance_before_expense - annual_expense
         cum_expense_abs += annual_expense
 
         # GROWTH CALCULATION (The "Plug"):
         net_growth_cum = balance - (start_balance + cum_contrib)
-
+        
+        # We record both Start and End balance.
+        # For the requested "Start of Year" view, 'StartBalance' is the key metric.
         rows.append(
             {
                 "Year": year_idx + 1,
-                "Balance": balance,
+                "StartBalance": balance_start_year,
+                "EndBalance": balance,
                 "CumContributions": cum_contrib,
                 "ContribYear": contrib_year,
                 "InvestGrowth": net_growth_cum,
@@ -106,6 +115,10 @@ def simulate_period_exact(
 ):
     balance = start_balance_nominal
     
+    # Loop simulates years passing.
+    # If start_age=50 and end_age=60, we simulate 10 years of growth.
+    # The result 'balance' is the End-of-Year balance of the final year.
+    # End-of-Year 59 is effectively Start-of-Year 60.
     for age in range(start_age, end_age):
         year_idx = age - current_age
         
@@ -170,15 +183,23 @@ def compute_bridge_age(
     early_withdrawal_tax_rate,
     use_yearly_compounding
 ):
-    # 1. Map Age -> Nominal Baseline Balance
+    # 1. Map Age -> Nominal Start-of-Year Balance
+    # We use StartBalance because the user wants to know:
+    # "At the start of Age X, do I have enough?"
     balance_nominal_by_age = {}
+    
+    # Initial state
     balance_nominal_by_age[current_age] = start_balance_input 
 
     for row in df_full.itertuples():
         age = row.Age
-        bal = row.Balance 
-        bal_nom = bal 
+        # Use StartBalance from the dataframe row
+        bal_nom = row.StartBalance 
         balance_nominal_by_age[age] = bal_nom
+        
+    # Also map the very next year (End of final row) to handle edge cases
+    last_row = df_full.iloc[-1]
+    balance_nominal_by_age[last_row.Age + 1] = last_row.EndBalance
 
     # 2. Determine Nominal Target at 60
     years_to_ret = retirement_age - current_age
@@ -189,15 +210,20 @@ def compute_bridge_age(
     start_age_candidate = current_age + 1
     
     for age0 in range(start_age_candidate, retirement_age + 1):
-        start_node = age0 - 1
-        if start_node not in balance_nominal_by_age:
+        if age0 not in balance_nominal_by_age:
             continue
-        start_bal = balance_nominal_by_age[start_node]
+            
+        # "Start Balance" at age0 is the pot of money we have on that birthday
+        start_bal = balance_nominal_by_age[age0]
+        
+        # Simulate from Start of age0 to Start of Age 60 (retirement_age in this context is just the cap)
+        # Actually, simulate_period_exact goes from start_age to end_age.
+        # If we retire at 50, we need to bridge to 60.
         
         proj_bal_at_60_nominal = simulate_period_exact(
             start_balance_nominal=start_bal,
             start_age=age0,
-            end_age=retirement_age, 
+            end_age=retirement_age, # In this specific function usage, retirement_age is acting as Age 60/Access Age
             current_age=current_age,
             annual_rates_full=annual_rates_by_year_full,
             annual_expense_real=withdrawal_needed_real,
@@ -225,8 +251,11 @@ def compute_coast_fi_age(
         
     target_at_60 = fi_annual_spend_today / base_30yr_swr
     
+    # We bridge to Age 60 (Standard retirement access age for this logic)
+    access_age = 60
+    
     age, bal = compute_bridge_age(
-        df_full, current_age, retirement_age, start_balance_input, annual_rates_by_year_full,
+        df_full, current_age, access_age, start_balance_input, annual_rates_by_year_full,
         infl_rate, show_real, 0.0, target_at_60,
         early_withdrawal_tax_rate, use_yearly_compounding
     )
@@ -243,9 +272,10 @@ def compute_regular_fi_age(
         return None, None
         
     target_at_60 = fi_annual_spend_today / base_swr
+    access_age = 60
     
     age, bal = compute_bridge_age(
-        df_full, current_age, retirement_age, start_balance_input, annual_rates_by_year_full,
+        df_full, current_age, access_age, start_balance_input, annual_rates_by_year_full,
         infl_rate, show_real, fi_annual_spend_today, target_at_60,
         early_withdrawal_tax_rate, use_yearly_compounding
     )
@@ -266,9 +296,10 @@ def compute_barista_fi_age(
         return None, None
 
     target_at_60 = fi_annual_spend_today / base_swr
+    access_age = 60
     
     age, bal = compute_bridge_age(
-        df_full, current_age, retirement_age, start_balance_input, annual_rates_by_year_full,
+        df_full, current_age, access_age, start_balance_input, annual_rates_by_year_full,
         infl_rate, show_real, gap, target_at_60,
         early_withdrawal_tax_rate, use_yearly_compounding
     )
@@ -411,7 +442,6 @@ def main():
     st.set_page_config(page_title="FIRE Planner", layout="wide")
     
     # Custom CSS for "Cards" styling
-    # ADJUSTED: Reduced padding, margin, and font sizes for a more compact single-row look
     st.markdown("""
     <style>
     .kpi-card {
@@ -700,7 +730,9 @@ def main():
         
         # Loop for equity
         for y in range(years_full):
-            years_from_now = y + 1
+            # For START OF YEAR view, we use 'y' instead of 'y+1' for appreciation
+            # Start of Year 0 = Base Price (No growth yet)
+            years_from_now = y 
             price_nom = base_price * ((1 + home_app_rate) ** years_from_now) if y >= purchase_idx else 0.0
             home_price_by_year_full[y] = price_nom
             
@@ -710,7 +742,7 @@ def main():
             else:
                 if y < purchase_idx: equity = 0.0
                 else:
-                    k = min((y - purchase_idx + 1) * 12, np)
+                    k = min((y - purchase_idx) * 12, np) # Start of year means k payments made previously
                     outstanding = (loan * (1+mortgage_rate/12)**k - mp*((1+mortgage_rate/12)**k - 1)/(mortgage_rate/12)) if (mortgage_rate > 0 and k > 0) else max(loan - mp*k, 0.0)
                     if k >= np: outstanding = 0.0
                     equity = max(price_nom - outstanding, 0.0)
@@ -718,6 +750,7 @@ def main():
             
             # Maintenance
             if y >= purchase_idx:
+                # Maintenance is paid during the year, based on value
                 maint_cost = price_nom * maintenance_pct
                 annual_expense_by_year_nominal_full[y] += maint_cost
                 annual_expense_by_year_nominal_full[y] += maint_cost
@@ -734,9 +767,12 @@ def main():
         use_yearly_compounding=use_yearly
     )
     df_full["Age"] = current_age + df_full["Year"] - 1
-    df_full["Balance"] = df_full["Balance"] # Nominal
+    # KEY CHANGE: "Balance" in our visuals will now map to "StartBalance"
+    # This aligns the chart with "Start of Year" expectations.
+    # We keep 'EndBalance' for logic that might need it.
     
     # --- KPI CALCS ---
+    # These functions now use StartBalance internally via the lookup map
     coast_age, _, _, _ = compute_coast_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, 
         infl_rate, show_real, base_swr_30yr, retirement_age, annual_rates_by_year_full,
@@ -759,14 +795,17 @@ def main():
     traditional_annual_income = 0.0
     
     if not traditional_row.empty:
-        bal_nom = traditional_row.iloc[0]["Balance"]
+        # Use StartBalance at Retirement Age
+        bal_nom = traditional_row.iloc[0]["StartBalance"]
         
         y_idx = retirement_age - current_age
-        expense_inflation_exponent = (retirement_age - current_age) + 1
+        # The living expense we need to cover starts at the beginning of that year
+        expense_inflation_exponent = (retirement_age - current_age) 
         living_expense_nominal_that_year = fi_annual_spend_today * ((1+infl_rate)**expense_inflation_exponent)
         
-        # Adjust the balance to match graph
-        bal_nom_aligned = bal_nom - living_expense_nominal_that_year
+        # Adjust the balance to match graph logic (subtracted during the year?) 
+        # Actually for Traditional start-of-year balance, we just display the pot size.
+        bal_nom_aligned = bal_nom
         
         # Deflate if necessary
         if show_real and infl_rate > 0:
@@ -803,7 +842,7 @@ def main():
         sec_fire, sec_gap, sec_trad = st.columns([1.6, 0.1, 1.1])
         
         with sec_fire:
-            st.markdown('<div class="compact-header">🚀 FIRE Goals</div>', unsafe_allow_html=True)
+            st.markdown('<div class="compact-header">🚀 FIRE Goals (Start of Year Balances)</div>', unsafe_allow_html=True)
             c1, c2, c3 = st.columns(3)
             
             # Regular FIRE
@@ -923,7 +962,7 @@ def main():
     det_total_portfolio_draw = []
 
     def to_nom(val, y_idx):
-        return val * ((1+infl_rate)**(y_idx+1)) if (show_real and infl_rate > 0) else val
+        return val * ((1+infl_rate)**(y_idx)) if (show_real and infl_rate > 0) else val
 
     # RE-CALC CHART EXPENSES TO INCLUDE EARLY TAX
     for y in range(years_full):
@@ -984,9 +1023,9 @@ def main():
             if y < len(df_income):
                 val_from_table = df_income.loc[y, "IncomeRealAfterTax"]
                 if show_real and infl_rate > 0:
-                       val_nominal = val_from_table * ((1 + infl_rate) ** y)
+                        val_nominal = val_from_table * ((1 + infl_rate) ** y)
                 else:
-                       val_nominal = val_from_table
+                        val_nominal = val_from_table
                 
                 detailed_income_active.append(val_nominal)
             else:
@@ -1006,7 +1045,10 @@ def main():
         annual_expense_chart, annual_rate_by_year=annual_rates_by_year_full,
         use_yearly_compounding=use_yearly
     )
-    df_chart["Age"] = current_age + df_chart["Year"]
+    df_chart["Age"] = current_age + df_chart["Year"] - 1
+    # VITAL: Map Balance to StartBalance for visuals
+    df_chart["Balance"] = df_chart["StartBalance"]
+    
     df_chart["HomeEquity"] = home_equity_by_year_full
     df_chart["NetWorth"] = df_chart["Balance"] + df_chart["HomeEquity"]
     
@@ -1020,10 +1062,11 @@ def main():
 
     # Real Adjustment
     if show_real and infl_rate > 0:
-        df_chart["DF"] = (1+infl_rate)**df_chart["Year"]
-        for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense", "ContribYear"]:
+        # For Start of Year adjustments, we deflate by (1+inf)^year_idx
+        df_chart["DF"] = (1+infl_rate)**(df_chart["Year"] - 1)
+        for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense", "StartBalance", "EndBalance"]:
             df_chart[c] /= df_chart["DF"]
-        for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear"]:
+        for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear", "ContribYear"]:
             df_chart[c] /= df_chart["DF"]
 
     # 5. Plot (In Left Column)
@@ -1036,14 +1079,14 @@ def main():
         # Main Balance
         fig.add_trace(go.Bar(
             x=df_p["Age"], y=df_p["Balance"], 
-            name="Invested Assets",
+            name="Invested Assets (Start of Year)",
             marker_color='rgba(58, 110, 165, 0.8)', # Strong Blue
             hovertemplate="$%{y:,.0f}"
         ))
         # Home Equity
         fig.add_trace(go.Bar(
             x=df_p["Age"], y=df_p["HomeEquity"], 
-            name="Home Equity",
+            name="Home Equity (Start of Year)",
             marker_color='rgba(167, 173, 178, 0.5)', # Grey
             hovertemplate="$%{y:,.0f}"
         ))
@@ -1085,8 +1128,8 @@ def main():
         
         fig.update_layout(
             # UPDATED TITLE SIZE AND BOLDNESS
-            title=dict(text="<b>Net Worth Projection</b>", font=dict(size=20)),
-            xaxis_title="Age", yaxis_title="Value ($)",
+            title=dict(text="<b>Net Worth Projection (Start of Year)</b>", font=dict(size=20)),
+            xaxis_title="Age (Start of Year)", yaxis_title="Value ($)",
             barmode='stack',
             hovermode="x unified",
             legend=dict(orientation="h", y=1.02, x=0.01),
@@ -1109,10 +1152,10 @@ def main():
         df_bull = compound_schedule(start_balance_effective, years_full, monthly_contrib_chart, annual_expense_chart, annual_rate_by_year=rates_bull, use_yearly_compounding=use_yearly)
         
         for df_ in [df_bear, df_bull]:
-            df_["Age"] = current_age + df_["Year"]
-            df_["NW"] = df_["Balance"] + home_equity_by_year_full
+            df_["Age"] = current_age + df_["Year"] - 1
+            df_["NW"] = df_["StartBalance"] + home_equity_by_year_full
             if show_real and infl_rate > 0:
-                df_["NW"] /= ((1+infl_rate)**df_["Year"])
+                df_["NW"] /= ((1+infl_rate)**(df_["Year"]-1))
         
         df_bear_p = df_bear[df_bear["Age"] <= plot_end]
         df_bull_p = df_bull[df_bull["Age"] <= plot_end]
@@ -1162,8 +1205,8 @@ def main():
         st.plotly_chart(fig_s, use_container_width=True)
 
     with tab3:
-        st.markdown("### Net Worth Summary")
-        st.caption("Simplified overview of your projected wealth over time.")
+        st.markdown("### Net Worth Summary (Start of Year)")
+        st.caption("Simplified overview of your projected wealth at the start of each age.")
         
         format_dict = {
             "Balance": "${:,.0f}",
@@ -1180,26 +1223,21 @@ def main():
         
     with tab4:
         st.markdown(f"**Audit Table: {scenario_label}**")
-        st.caption("Use this table to verify the math row-by-row.")
+        st.caption("Detailed view of Start Balance to End Balance flow.")
 
         st.markdown("""
-        #### 🧮 How to calculate the Balance
-        To reproduce the **Balance** column, use the following equation (this is easiest to verify if **"Show Real Dollars"** is UNCHECKED, as inflation adjustment complicates row-by-row addition):
+        #### 🧮 Flow Logic
         
         $$
-        \\text{Balance}_{End} = \\text{Balance}_{Start} + \\text{Growth} + \\text{AnnualSavings} - \\text{Withdrawals}
+        \\text{EndBalance} = \\text{StartBalance} + \\text{Growth} + \\text{AnnualSavings} - \\text{Withdrawals}
         $$
         
-        Where:
-        * $\\text{Balance}_{Start}$: The Balance from the previous year.
-        * $\\text{Growth}$ (`InvestGrowthYear`): The return earned on your portfolio this year.
-        * $\\text{AnnualSavings}$ (`ContribYear`): New savings added to the portfolio (Income - Expenses).
-        * $\\text{Withdrawals}$ (`TotalPortfolioDraw`): Money taken OUT of the portfolio (includes Retirement Spending + Taxes + Kids + Cars + Home).
+        Note: The **StartBalance** of the next row (Age + 1) equals the **EndBalance** of the current row.
         """)
         
         format_dict_d = {
-            "Balance": "${:,.0f}",
-            "NetWorth": "${:,.0f}",
+            "StartBalance": "${:,.0f}",
+            "EndBalance": "${:,.0f}",
             "LivingWithdrawal": "${:,.0f}",
             "TaxPenalty": "${:,.0f}",
             "KidCost": "${:,.0f}",
@@ -1215,17 +1253,18 @@ def main():
         
         cols = [
             "Age", 
+            "StartBalance",
             "AnnualRate",
             "InvestGrowthYear",
             "ContribYear", 
             "TotalPortfolioDraw",
-            "Balance",
-            "LivingWithdrawal", 
-            "TaxPenalty", 
-            "KidCost", 
-            "CarCost", 
-            "HomeCost",
-            "ScenarioActiveIncome"
+            "EndBalance",
+            # "LivingWithdrawal", 
+            # "TaxPenalty", 
+            # "KidCost", 
+            # "CarCost", 
+            # "HomeCost",
+            # "ScenarioActiveIncome"
         ]
         
         st.dataframe(
@@ -1236,6 +1275,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
