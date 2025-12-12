@@ -1058,8 +1058,20 @@ def main():
         val_bar = str(barista_age) if barista_age else "N/A"
         color_bar = "#0D47A1" if barista_age else "#CC0000"
         if barista_age:
-            swr_b = get_dynamic_swr(barista_until_age, base_swr_30yr)
-            desc_bar = f"Gap SWR: {swr_b*100:.2f}%. Work until {barista_until_age}."
+            row_b = df_full[df_full["Age"] == barista_age]
+            if not row_b.empty:
+                # Calculate Nominal Gap
+                gap_real = max(0, barista_spend_today - barista_income_today)
+                y_idx = barista_age - current_age
+                gap_nom = gap_real * ((1 + infl_rate) ** y_idx)
+                
+                # Nominal Balance at start of that year
+                bal_nom = row_b.iloc[0]["StartBalance"]
+                
+                eff_swr = (gap_nom / bal_nom) if bal_nom > 0 else 0.0
+                desc_bar = f"Gap SWR: {eff_swr*100:.2f}%. Work until {barista_until_age}."
+            else:
+                desc_bar = f"Work until {barista_until_age}."
         else:
             desc_bar = "N/A"
         render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", desc_bar)
