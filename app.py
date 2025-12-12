@@ -271,16 +271,27 @@ def compute_regular_fi_age(
     if fi_annual_spend_today <= 0 or base_swr <= 0 or df_full is None:
         return None, None
         
-    target_at_60 = fi_annual_spend_today / base_swr
-    access_age = 60
+    # We calculate the Real Target (Today's Dollars)
+    target_real = fi_annual_spend_today / base_swr
     
-    age, bal = compute_bridge_age(
-        df_full, current_age, access_age, start_balance_input, annual_rates_by_year_full,
-        infl_rate, show_real, fi_annual_spend_today, target_at_60,
-        early_withdrawal_tax_rate, use_yearly_compounding
-    )
-    
-    return age, target_at_60
+    # Iterate through the simulation rows to find the first year where
+    # StartBalance >= Target (Nominal)
+    # This aligns strictly with "Hitting the Number"
+    for row in df_full.itertuples():
+        age = row.Age
+        
+        # Calculate the Nominal Target for this specific year
+        # Inflation applies from year 0 (current_age) to this year
+        years_passed = age - current_age
+        
+        # Inflate the real target to comparable nominal dollars
+        target_nominal = target_real * ((1 + infl_rate) ** years_passed)
+        
+        if row.StartBalance >= target_nominal:
+            # We found the age where we cross the threshold
+            return age, target_real
+            
+    return None, target_real
 
 
 def compute_barista_fi_age(
