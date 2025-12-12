@@ -676,38 +676,8 @@ def main():
         else:
             car_cost_today, first_car_age, car_interval_years = 0,0,0
 
-    # 5. Simulation Scenario (MOVED TO SIDEBAR)
-    with st.sidebar.expander("5. Simulation Scenario", expanded=True):
-        st.markdown("**Visualize Scenario**")
-        
-        use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
-        
-        # Custom Early Retirement Slider
-        default_exit = fi_age_regular if fi_age_regular else 55
-        custom_exit_age = st.slider("Custom Early Ret. Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
-        
-        # Scenario Selector
-        scenario_keys = ["Work"]
-        display_map = {"Work": "Work until Full Retirement"}
-        
-        if barista_age:
-            scenario_keys.append("Barista")
-            display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
-            
-        scenario_keys.append("Custom")
-        display_map["Custom"] = f"Custom (Age {custom_exit_age})"
-        
-        # We need a default index that is valid
-        default_ix = 0
-        
-        selected_key = st.selectbox(
-            "Select Scenario:", 
-            options=scenario_keys, 
-            format_func=lambda x: display_map[x],
-            index=default_ix
-        )
-
-    # --- CALCULATION ENGINE ---
+    # --- CALCULATION ENGINE (MOVED UP) ---
+    # Need to run this BEFORE Sidebar 5 to get default values for sliders
     
     df_income = build_income_schedule(
         current_age, retirement_age, start_income, income_growth_rate,
@@ -826,7 +796,7 @@ def main():
     # This aligns the chart with "Start of Year" expectations.
     # We keep 'EndBalance' for logic that might need it.
     
-    # --- KPI CALCS ---
+    # --- KPI CALCS (MOVED UP) ---
     # These functions now use StartBalance internally via the lookup map
     coast_age, _, _, _ = compute_coast_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, 
@@ -840,6 +810,37 @@ def main():
         df_full, current_age, start_balance_effective, fi_annual_spend_today, barista_income_today, 
         infl_rate, base_swr_30yr, barista_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly
     )
+
+    # 5. Simulation Scenario (MOVED TO SIDEBAR)
+    with st.sidebar.expander("5. Simulation Scenario", expanded=True):
+        st.markdown("**Visualize Scenario**")
+        
+        use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
+        
+        # Custom Early Retirement Slider
+        default_exit = fi_age_regular if fi_age_regular else 55
+        custom_exit_age = st.slider("Custom Early Ret. Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
+        
+        # Scenario Selector
+        scenario_keys = ["Work"]
+        display_map = {"Work": "Work until Full Retirement"}
+        
+        if barista_age:
+            scenario_keys.append("Barista")
+            display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
+            
+        scenario_keys.append("Custom")
+        display_map["Custom"] = f"Custom (Age {custom_exit_age})"
+        
+        # We need a default index that is valid
+        default_ix = 0
+        
+        selected_key = st.selectbox(
+            "Select Scenario:", 
+            options=scenario_keys, 
+            format_func=lambda x: display_map[x],
+            index=default_ix
+        )
 
     # --- DETERMINE SCENARIO LOGIC (Moved up for Chart & KPI) ---
     stop_age = retirement_age # Default
