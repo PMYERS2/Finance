@@ -482,19 +482,12 @@ def main():
     # Global Settings (Age affects defaults)
     current_age = st.sidebar.number_input("Current Age", 20, 100, 30)
     
-    # 1. Future Goals (Moved to Top)
-    with st.sidebar.expander("1. Future Goals", expanded=True):
-        ret_default = max(60, current_age + 1)
-        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
-        
-        fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
-        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
-
-    # 2. Profile Details
-    with st.sidebar.expander("2. Income & Expenses", expanded=True):
+    # 1. Profile & Income (Reordered First)
+    with st.sidebar.expander("1. Income & Expenses", expanded=True):
         start_income = st.number_input("Pre-tax Income ($)", 0, 1000000, 90000, step=5000)
         expense_today = st.number_input("Current Expenses ($/yr)", 0, 500000, 36000, step=1000)
-    
+        state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
+
         st.markdown("**Income Growth & Adjustments**")
         st.caption("Use positive % for raises, negative % (e.g. -50) for pay cuts (e.g. partner quitting).")
         income_growth_rate = st.number_input("Annual Income Growth (%)", 0.0, 20.0, 3.0, 0.5) / 100.0
@@ -512,7 +505,8 @@ def main():
         if p1_pct != 0: promotions[p1_age] = p1_pct
         if p2_pct != 0: promotions[p2_age] = p2_pct
 
-    with st.sidebar.expander("3. Assets & Housing", expanded=True):
+    # 2. Assets & Housing (Reordered Second)
+    with st.sidebar.expander("2. Assets & Housing", expanded=True):
         start_balance_input = st.number_input("Invested Assets ($)", 0, 10000000, 100000, step=5000)
         
         include_home = st.checkbox("Include Home Strategy", True)
@@ -536,7 +530,7 @@ def main():
                 np = years_remaining_loan * 12
                 mp = (loan * (mortgage_rate/12) / (1 - (1+mortgage_rate/12)**(-np))) if mortgage_rate > 0 else loan/np
             else:
-                home_price_today = st.number_input("Target Price ($)", value=250000)
+                home_price_today = st.number_input("Target Price ($)", value=350000) # UPDATED DEFAULT
                 planned_purchase_age = st.number_input("Buy Age", value=current_age+2, min_value=current_age)
                 down_payment_pct = st.number_input("Down Payment %", value=20.0) / 100.0
                 mortgage_rate = st.number_input("Rate (%)", value=5.8) / 100.0
@@ -552,10 +546,19 @@ def main():
             # Maintenance & Apprec defaults
             maintenance_pct = 0.01
             home_app_rate = 0.03
-            current_rent = st.number_input("Current Rent", value=1100)
+            current_rent = st.number_input("Current Rent", value=1500) # UPDATED DEFAULT
             est_prop_tax_monthly = st.number_input("Tax/Ins ($/mo)", value=300)
 
-    with st.sidebar.expander("Assumptions & Adjustments", expanded=False):
+    # 3. Future Goals (Reordered Third)
+    with st.sidebar.expander("3. Future Goals", expanded=True):
+        ret_default = max(60, current_age + 1)
+        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
+        
+        fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
+        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
+
+    # 4. Assumptions
+    with st.sidebar.expander("4. Assumptions & Adjustments", expanded=False):
         compounding_type = st.radio("Compounding Frequency", ["Monthly", "Yearly"], index=0, help="Monthly is more precise. Yearly is easier to calculate by hand.")
         use_yearly = (compounding_type == "Yearly")
         
@@ -588,14 +591,14 @@ def main():
 
         infl_rate = st.number_input("Inflation (%)", 0.0, 10.0, 3.0, 0.1) / 100.0
         base_swr_30yr = st.number_input("Safe Withdrawal Rate (%)", 1.0, 10.0, 4.0, 0.1) / 100.0
-        state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
+        # state_tax_rate MOVED TO INCOME SECTION
         expense_growth_rate = st.number_input("Expense Growth > Inflation (%)", 0.0, 10.0, 0.0, 0.5) / 100.0
         savings_rate_override = 0.0 
         
         st.markdown("---")
         st.markdown("**Early Withdrawal Taxes**")
         st.caption("Effective tax/penalty rate on withdrawals before age 60.")
-        early_withdrawal_tax_rate = st.number_input("Early Tax Rate (%)", 0.0, 50.0, 10.0, 1.0) / 100.0
+        early_withdrawal_tax_rate = st.number_input("Early Tax Rate (%)", 0.0, 50.0, 15.0, 1.0) / 100.0 # UPDATED DEFAULT
 
         st.markdown("---")
         st.markdown("**One-time Expenses**")
@@ -615,7 +618,7 @@ def main():
             c1, c2 = st.columns(2)
             car_cost_today = c1.number_input("Car Cost ($)", value=30000)
             first_car_age = c2.number_input("First Purchase Age", value=current_age+5)
-            car_interval_years = c1.number_input("Replace Every (Yrs)", value=8)
+            car_interval_years = c1.number_input("Replace Every (Yrs)", value=10) # UPDATED DEFAULT
         else:
             car_cost_today, first_car_age, car_interval_years = 0,0,0
 
