@@ -484,8 +484,8 @@ def main():
     
     # 1. Profile & Income (Reordered First)
     with st.sidebar.expander("1. Income & Expenses", expanded=True):
-        start_income = st.number_input("Pre-tax Income ($)", 0, 1000000, 90000, step=5000)
-        expense_today = st.number_input("Current Expenses ($/yr)", 0, 500000, 36000, step=1000)
+        start_income = st.number_input("Pre-tax Income ($)", 0, 1000000, 100000, step=5000)
+        expense_today = st.number_input("Current Expenses ($/yr)", 0, 500000, 40000, step=1000)
         state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
 
         st.markdown("**Income Growth & Adjustments**")
@@ -1236,3 +1236,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
