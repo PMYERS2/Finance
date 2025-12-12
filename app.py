@@ -505,11 +505,19 @@ def main():
         if p1_pct != 0: promotions[p1_age] = p1_pct
         if p2_pct != 0: promotions[p2_age] = p2_pct
 
-    # 2. Assets & Housing (Reordered Second)
-    with st.sidebar.expander("2. Assets & Housing", expanded=True):
+    # 2. Future Goals (Reordered Second)
+    with st.sidebar.expander("2. Future Goals", expanded=True):
+        ret_default = max(60, current_age + 1)
+        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
+        
+        fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
+        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
+
+    # 3. Assets & Housing (Reordered Third)
+    with st.sidebar.expander("3. Assets & Housing", expanded=True):
         start_balance_input = st.number_input("Invested Assets ($)", 0, 10000000, 100000, step=5000)
         
-        include_home = st.checkbox("Include Home Strategy", True)
+        include_home = st.checkbox("Include Home Strategy", False) # Default OFF
         # Default Home vars
         home_price_today = 0
         home_equity_by_year_full = [] 
@@ -530,7 +538,7 @@ def main():
                 np = years_remaining_loan * 12
                 mp = (loan * (mortgage_rate/12) / (1 - (1+mortgage_rate/12)**(-np))) if mortgage_rate > 0 else loan/np
             else:
-                home_price_today = st.number_input("Target Price ($)", value=350000) # UPDATED DEFAULT
+                home_price_today = st.number_input("Target Price ($)", value=350000)
                 planned_purchase_age = st.number_input("Buy Age", value=current_age+2, min_value=current_age)
                 down_payment_pct = st.number_input("Down Payment %", value=20.0) / 100.0
                 mortgage_rate = st.number_input("Rate (%)", value=5.8) / 100.0
@@ -546,16 +554,8 @@ def main():
             # Maintenance & Apprec defaults
             maintenance_pct = 0.01
             home_app_rate = 0.03
-            current_rent = st.number_input("Current Rent", value=1500) # UPDATED DEFAULT
+            current_rent = st.number_input("Current Rent", value=1500, help="This rent amount is removed from your annual expenses if you buy a home, helping offset the new mortgage cost.") 
             est_prop_tax_monthly = st.number_input("Tax/Ins ($/mo)", value=300)
-
-    # 3. Future Goals (Reordered Third)
-    with st.sidebar.expander("3. Future Goals", expanded=True):
-        ret_default = max(60, current_age + 1)
-        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
-        
-        fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
-        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
 
     # 4. Assumptions
     with st.sidebar.expander("4. Assumptions & Adjustments", expanded=False):
@@ -576,7 +576,7 @@ def main():
         invest_style = st.selectbox(
             "Portfolio Style", 
             options=list(style_map.keys()), 
-            index=0,
+            index=1, # Default Balanced
             help="Sets the baseline return. Rates decrease automatically as you age (Glide Path)."
         )
         
@@ -598,11 +598,11 @@ def main():
         st.markdown("---")
         st.markdown("**Early Withdrawal Taxes**")
         st.caption("Effective tax/penalty rate on withdrawals before age 60.")
-        early_withdrawal_tax_rate = st.number_input("Early Tax Rate (%)", 0.0, 50.0, 15.0, 1.0) / 100.0 # UPDATED DEFAULT
+        early_withdrawal_tax_rate = st.number_input("Early Tax Rate (%)", 0.0, 50.0, 15.0, 1.0) / 100.0
 
         st.markdown("---")
         st.markdown("**One-time Expenses**")
-        use_kid = st.checkbox("Include Kids Expenses", True)
+        use_kid = st.checkbox("Include Kids Expenses", False) # Default OFF
         if use_kid:
             k1, k2 = st.columns(2)
             kids_start_age = k1.number_input("Parent Age at First Kid", value=current_age+2)
@@ -613,12 +613,12 @@ def main():
         else:
             kids_start_age, num_kids, kid_spacing, support_years, annual_cost_per_kid_today = 0,0,0,0,0
 
-        use_car = st.checkbox("Include Car Replacement", True)
+        use_car = st.checkbox("Include Car Replacement", False) # Default OFF
         if use_car:
             c1, c2 = st.columns(2)
             car_cost_today = c1.number_input("Car Cost ($)", value=30000)
             first_car_age = c2.number_input("First Purchase Age", value=current_age+5)
-            car_interval_years = c1.number_input("Replace Every (Yrs)", value=10) # UPDATED DEFAULT
+            car_interval_years = c1.number_input("Replace Every (Yrs)", value=10)
         else:
             car_cost_today, first_car_age, car_interval_years = 0,0,0
 
