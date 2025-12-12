@@ -13,7 +13,7 @@ def compound_schedule(
     annual_expense_by_year,
     annual_rate=None,
     annual_rate_by_year=None,
-    use_yearly_compounding=False # NEW ARGUMENT
+    use_yearly_compounding=False
 ):
     if annual_rate_by_year is not None and len(annual_rate_by_year) != years:
         raise ValueError("annual_rate_by_year length must equal 'years'")
@@ -35,12 +35,10 @@ def compound_schedule(
         growth_year_sum = 0.0
 
         if use_yearly_compounding:
-            # --- YEARLY COMPOUNDING LOGIC (Simplified for hand-math) ---
-            # 1. Growth is calculated on the starting balance only
+            # --- YEARLY COMPOUNDING LOGIC ---
             growth_year_sum = balance * r
             balance += growth_year_sum
             
-            # 2. Add contributions (Assumed End-of-Year lump sum for simple math)
             monthly_val = monthly_contrib_by_year[year_idx]
             annual_contrib = monthly_val * 12.0
             balance += annual_contrib
@@ -48,7 +46,7 @@ def compound_schedule(
             contrib_year = annual_contrib
             cum_contrib += annual_contrib
         else:
-            # --- MONTHLY COMPOUNDING LOGIC (Standard) ---
+            # --- MONTHLY COMPOUNDING LOGIC ---
             m = 12
             for _ in range(m):
                 monthly_contrib = monthly_contrib_by_year[year_idx]
@@ -125,7 +123,6 @@ def simulate_period_exact(
         # 2. Base Expense Calculation
         base_expense_nominal = annual_expense_real * infl_factor
         if tax_rate > 0:
-            # General tax adjustment if used
             base_expense_nominal = base_expense_nominal / (1.0 - tax_rate)
 
         # 3. Net Draw Needed
@@ -143,13 +140,11 @@ def simulate_period_exact(
             final_withdrawal_nominal = net_draw_nominal 
 
         if use_yearly_compounding:
-            # Yearly Logic: Grow start balance, then add contribs, subtract withdrawal
             growth = balance * r_nominal
             balance += growth
             balance += (contrib_nominal * 12.0)
             balance -= final_withdrawal_nominal
         else:
-            # Monthly Logic
             monthly_rate = r_nominal / 12.0
             for _ in range(12):
                 balance += contrib_nominal
@@ -426,7 +421,7 @@ def main():
         text-align: center;
         margin-bottom: 10px;
         height: 100%;
-        min-height: 120px; /* Reduced min-height for compactness */
+        min-height: 120px;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -462,23 +457,15 @@ def main():
         padding-bottom: 5px;
         border-bottom: 2px solid #f0f0f0;
     }
-    .formula-box {
-        background-color: #e8f5e9;
-        border-left: 5px solid #2e7d32;
-        padding: 10px;
-        border-radius: 5px;
-        margin-bottom: 10px;
-    }
     </style>
     """, unsafe_allow_html=True)
 
     # Description of purpose
     st.markdown("### Purpose of report: Forecast net worth overtime or estimate retirement age.")
     
-    # MOVED SHOW REAL DOLLARS TO TOP
     show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
 
-    # Container for Verdict Cards (so they can be populated after we define dashboard controls below)
+    # Container for Verdict Cards
     kpi_container = st.container()
     
     # --- SIDEBAR: Grouped & Organized ---
@@ -488,7 +475,6 @@ def main():
     
     # 1. Future Goals (Moved to Top)
     with st.sidebar.expander("1. Future Goals", expanded=True):
-        # FIX: Dynamic default for retirement age to prevent error if current_age >= 60
         ret_default = max(60, current_age + 1)
         retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
         
@@ -506,7 +492,6 @@ def main():
         promotions = {}
         c1, c2 = st.columns(2)
         with c1:
-            # FIX: Use max() to ensure the default value never falls below the dynamic min_value (current_age + 1)
             p1_default = max(35, current_age + 1)
             p1_age = st.number_input("Event 1 Age", current_age+1, 90, p1_default)
             
@@ -524,7 +509,7 @@ def main():
         include_home = st.checkbox("Include Home Strategy", True)
         # Default Home vars
         home_price_today = 0
-        home_equity_by_year_full = [] # Will fill later
+        home_equity_by_year_full = [] 
         
         # Home Inputs logic
         if include_home:
@@ -565,15 +550,14 @@ def main():
         compounding_type = st.radio("Compounding Frequency", ["Monthly", "Yearly"], index=0, help="Monthly is more precise. Yearly is easier to calculate by hand.")
         use_yearly = (compounding_type == "Yearly")
         
-        # --- NEW INVESTMENT STYLE SELECTOR ---
+        # --- NEW INVESTMENT STYLE SELECTOR (RENAMED) ---
         st.markdown("**Investment Strategy**")
         
         # Map style to the "Anchor Rate" (Return at age 45-55).
-        # Glide path adds +1% for age < 35, and subtracts -1.5% for age > 65.
         style_map = {
-            "Aggressive (100% Stocks)": 0.09,   # Starts at 10%, drops to 7.5%
-            "Balanced (60/40 Split)": 0.07,     # Starts at 8%, drops to 5.5%
-            "Conservative (Heavy Bonds)": 0.05, # Starts at 6%, drops to 3.5%
+            "Aggressive": 0.09,   # Renamed from "Aggressive (100% Stocks)"
+            "Balanced": 0.07,     # Renamed from "Balanced (60/40 Split)"
+            "Conservative": 0.05, # Renamed from "Conservative (Heavy Bonds)"
             "Custom": None
         }
         
@@ -597,7 +581,6 @@ def main():
         base_swr_30yr = st.number_input("Safe Withdrawal Rate (%)", 1.0, 10.0, 4.0, 0.1) / 100.0
         state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
         expense_growth_rate = st.number_input("Expense Growth > Inflation (%)", 0.0, 10.0, 0.0, 0.5) / 100.0
-        # REMOVED FORCE SAVINGS RATE SLIDER
         savings_rate_override = 0.0 
         
         st.markdown("---")
@@ -628,7 +611,6 @@ def main():
             car_cost_today, first_car_age, car_interval_years = 0,0,0
 
     # --- CALCULATION ENGINE ---
-    # (Same logic as before, just processing the data)
     
     df_income = build_income_schedule(
         current_age, retirement_age, start_income, income_growth_rate,
@@ -653,7 +635,7 @@ def main():
     # Base Expenses (Kids, Cars, Housing)
     annual_expense_by_year_nominal_full = [0.0] * years_full
     
-    # NEW: Tracking specific expense buckets for the detailed chart
+    # Tracking specific expense buckets
     exp_kids_nominal = [0.0] * years_full
     exp_cars_nominal = [0.0] * years_full
     exp_housing_nominal = [0.0] * years_full
@@ -759,38 +741,14 @@ def main():
     )
 
     # --- EXTRA KPI: TRADITIONAL RETIREMENT OUTCOME ---
-    # Find the row for 'retirement_age' to see what the pot looks like.
-    # ADJUSTMENT: To align with the graph (which deducts living expenses for the retirement year itself),
-    # we must subtract the living expense from df_full's balance (which only subtracts extra expenses like kids/housing).
-    
     traditional_row = df_full[df_full["Age"] == retirement_age]
     traditional_balance_display = 0.0
     traditional_annual_income = 0.0
     
     if not traditional_row.empty:
-        # Get nominal balance from the accumulation-only simulation
         bal_nom = traditional_row.iloc[0]["Balance"]
         
-        # Calculate the living expense withdrawal that the graph subtracts for this specific year
-        years_passed = retirement_age - current_age
-        infl_factor = (1 + infl_rate) ** years_passed
-        # Note: Graph uses ((1+infl)**(y+1)) where y is index. 
-        # y = retirement_age - current_age - 1 ?? No.
-        # In graph loop: age = current_age + y. If age == retirement_age, then y = retirement_age - current_age.
-        # Expense factor = (1+infl)**(y+1).
-        
         y_idx = retirement_age - current_age
-        # Note: df_full 'Year' is y_idx+1. 
-        
-        living_expense_nominal_that_year = fi_annual_spend_today * ((1 + infl_rate) ** (y_idx))
-        # Wait, check graph logic:
-        # if age >= stop_age: base_need = fi_annual_spend_today * ((1+infl_rate)**(y+1))
-        # y starts at 0. age = current_age + y. 
-        # So if age == retirement_age, then y = retirement_age - current_age.
-        # So exponent is (retirement_age - current_age + 1).
-        
-        # Actually, let's use the standard inflation factor used for display to keep it simple,
-        # but the graph uses (y+1).
         expense_inflation_exponent = (retirement_age - current_age) + 1
         living_expense_nominal_that_year = fi_annual_spend_today * ((1+infl_rate)**expense_inflation_exponent)
         
@@ -799,7 +757,6 @@ def main():
         
         # Deflate if necessary
         if show_real and infl_rate > 0:
-            # Display factor matches the year
             display_deflator = (1 + infl_rate) ** (retirement_age - current_age)
             traditional_balance_display = bal_nom_aligned / display_deflator
         else:
@@ -814,8 +771,6 @@ def main():
     def render_card(col, title, value, desc, sub_value=None):
         sub_html = f"<div style='font-size:14px; font-weight:600; color:#2E7D32; margin-top:4px;'>{sub_value}</div>" if sub_value else ""
         
-        # Use simple string concatenation to avoid IndentationError or Markdown code-block interpretation
-        # This guarantees the HTML is treated as a flat string with no leading whitespace issues.
         html_content = (
             f'<div class="kpi-card">'
             f'<div class="kpi-title">{title}</div>'
@@ -829,35 +784,44 @@ def main():
             st.markdown(html_content, unsafe_allow_html=True)
 
     with kpi_container:
-        # Combined into Single Row
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # --- SPLIT INTO 2 SECTIONS AS REQUESTED ---
         
-        # 1. Regular FIRE
+        # 1. FIRE Section (3 Columns)
+        st.markdown("#### 🚀 FIRE Goals")
+        c1, c2, c3 = st.columns(3)
+        
+        # Regular FIRE
         val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
         color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
-        render_card(col1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", f"Quit completely. Target: ${fi_target_bal:,.0f}.")
+        render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", f"Quit completely. Target: ${fi_target_bal:,.0f}.")
 
-        # 2. Barista FIRE
+        # Barista FIRE
         val_bar = str(barista_age) if barista_age else "N/A"
         color_bar = "#0D47A1" if barista_age else "#CC0000"
-        render_card(col2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", f"Switch to ${barista_income_today/1000:.0f}k job.")
+        render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", f"Switch to ${barista_income_today/1000:.0f}k job.")
         
-        # 3. Coast FIRE
+        # Coast FIRE
         val_cst = str(coast_age) if coast_age else "N/A"
         color_cst = "#0D47A1" if coast_age else "#CC0000"
-        render_card(col3, "Coast FIRE Age", f"<span style='color:{color_cst}'>{val_cst}</span>", f"Stop saving. Work to cover expenses only.")
+        render_card(c3, "Coast FIRE Age", f"<span style='color:{color_cst}'>{val_cst}</span>", f"Stop saving. Work to cover expenses only.")
 
-        # 4. Traditional Pot
+        st.markdown("---")
+        
+        # 2. Traditional Section (2 Columns)
+        st.markdown(f"#### 👴 Traditional Retirement (Age {retirement_age})")
+        c4, c5 = st.columns(2)
+
+        # Traditional Pot
         render_card(
-            col4, 
+            c4, 
             f"Nest Egg at {retirement_age}", 
             f"${traditional_balance_display:,.0f}", 
             "Projected portfolio balance if you continue working."
         )
         
-        # 5. Traditional Income
+        # Traditional Income
         render_card(
-            col5, 
+            c5, 
             f"Future Income", 
             f"${traditional_annual_income:,.0f}/yr", 
             f"Based on {base_swr_30yr*100:.1f}% SWR.",
@@ -869,7 +833,6 @@ def main():
     
     st.markdown("---")
     
-    # SPLIT LAYOUT: Graph on Left (3), Controls on Right (1)
     viz_col, control_col = st.columns([3, 1])
     
     # 1. Define Controls in Right Column
@@ -896,7 +859,6 @@ def main():
         scenario_keys.append("Custom")
         display_map["Custom"] = f"Custom (Age {custom_exit_age})"
         
-        # FIX FOR RESETTING: Calculate index explicitly based on state
         current_selection = st.session_state.get("scenario_selector", "Work")
         try:
             default_ix = scenario_keys.index(current_selection)
@@ -915,7 +877,6 @@ def main():
     stop_age = retirement_age # Default
     is_coast, is_barista, is_early = False, False, False
     
-    # Logic updated to match keys
     if selected_key == "Coast":
         stop_age = coast_age
         is_coast = True
@@ -934,16 +895,11 @@ def main():
 
     # 3. Build Chart Data
     monthly_contrib_chart = []
+    annual_expense_chart = list(annual_expense_by_year_nominal_full) 
     
-    # We will rebuild the expense chart based on specific scenario logic
-    # Start with the fixed expenses (Kids, Cars, Housing) calculated earlier
-    annual_expense_chart = list(annual_expense_by_year_nominal_full) # Initializes with Kids/Cars/Housing
-    
-    # Data collectors for Detailed Table (Tab 4)
     detailed_income_active = []
     detailed_expense_total = []
     
-    # Breakdown columns
     det_living_withdrawal = []
     det_tax_penalty = []
     det_kids = []
@@ -962,23 +918,19 @@ def main():
         val = monthly_contrib_by_year_full[y] if age < stop_age else 0.0
         monthly_contrib_chart.append(val)
         
-        # Initialize Detailed metrics for this year
         active_income_this_year = 0.0
         base_need = 0.0
         
         # 2. Retirement Phase Expenses
         if age >= stop_age:
-            # Base spend need in this future year
             if is_coast:
-                 # Coast: You earn enough to cover expenses
-                 active_income_this_year = fi_annual_spend_today # Assumed you earn exactly what you spend
+                 active_income_this_year = fi_annual_spend_today 
                  if age < retirement_age: 
-                     base_need = 0.0 # Portfolio covers 0
+                     base_need = 0.0 
                  else: 
                      base_need = fi_annual_spend_today * ((1+infl_rate)**(y+1))
-                     active_income_this_year = 0.0 # Retired fully
+                     active_income_this_year = 0.0
             elif is_barista:
-                 # Barista: You earn some, portfolio covers gap
                  if age < retirement_age:
                      active_income_this_year = barista_income_today
                      base_need = max(0, fi_annual_spend_today - barista_income_today) * ((1+infl_rate)**(y+1))
@@ -992,10 +944,8 @@ def main():
                  if age < retirement_age: base_need = 0.0
                  else: base_need = fi_annual_spend_today * ((1+infl_rate)**(y+1))
 
-            # Net Draw Needed (Base Need)
             net_draw = base_need
             
-            # Early Withdrawal Tax Gross-up (If needed)
             gross_withdrawal = net_draw
             tax_penalty_amount = 0.0
             
@@ -1004,40 +954,24 @@ def main():
                     gross_withdrawal = net_draw / (1.0 - early_withdrawal_tax_rate)
                     tax_penalty_amount = gross_withdrawal - net_draw
             
-            # Apply to chart array (Additive to existing one-time expenses like cars/homes)
-            # annual_expense_chart[y] already contains Kids + Cars + Housing from initialization
             annual_expense_chart[y] += gross_withdrawal
             
-            # Total expense for table is what you actually spent + taxes, roughly approximated by draw + active income
             detailed_expense_total.append(gross_withdrawal + to_nom(active_income_this_year, y))
             detailed_income_active.append(to_nom(active_income_this_year, y))
             
-            # Store breakdown
             det_living_withdrawal.append(net_draw)
             det_tax_penalty.append(tax_penalty_amount)
-            # Total draw = Housing + Kids + Cars + Living + Tax
-            # Housing/Kids/Cars are in the pre-filled annual_expense_chart but we have them in separate lists too
-            # Wait, annual_expense_chart[y] WAS initialized with exp_kids + exp_cars + exp_housing.
-            # We just added gross_withdrawal (which is Living + Tax).
-            # So annual_expense_chart[y] IS the total portfolio draw.
             det_total_portfolio_draw.append(annual_expense_chart[y])
 
         else:
-            # Working Phase
-            # In working phase, expense is handled implicitly by savings rate in 'df_income' 
-            # But 'annual_expense_chart' tracks EXTRA expenses (kids/homes).
-            # We'll just log 0 for portfolio draw in accumulation phase
-            det_total_portfolio_draw.append(annual_expense_chart[y]) # Just the extra expenses
+            det_total_portfolio_draw.append(annual_expense_chart[y]) 
             
-            # SHOW ACTIVE INCOME: Retrieve from income DF so chart isn't empty
             if y < len(df_income):
                 val_from_table = df_income.loc[y, "IncomeRealAfterTax"]
-                # If show_real is True, val_from_table is Real. The chart logic below expects Nominal 
-                # because it applies the deflation math at the very end (lines ~800).
                 if show_real and infl_rate > 0:
-                     val_nominal = val_from_table * ((1 + infl_rate) ** y)
+                      val_nominal = val_from_table * ((1 + infl_rate) ** y)
                 else:
-                     val_nominal = val_from_table
+                      val_nominal = val_from_table
                 
                 detailed_income_active.append(val_nominal)
             else:
@@ -1047,7 +981,6 @@ def main():
             det_living_withdrawal.append(0.0)
             det_tax_penalty.append(0.0)
 
-        # Append specific expenses
         det_kids.append(exp_kids_nominal[y])
         det_cars.append(exp_cars_nominal[y])
         det_housing.append(exp_housing_nominal[y])
@@ -1062,7 +995,6 @@ def main():
     df_chart["HomeEquity"] = home_equity_by_year_full
     df_chart["NetWorth"] = df_chart["Balance"] + df_chart["HomeEquity"]
     
-    # Append detailed columns for Tab 4 (Nominal at this stage)
     df_chart["ScenarioActiveIncome"] = detailed_income_active
     df_chart["TotalPortfolioDraw"] = det_total_portfolio_draw
     df_chart["LivingWithdrawal"] = det_living_withdrawal
@@ -1074,29 +1006,26 @@ def main():
     # Real Adjustment
     if show_real and infl_rate > 0:
         df_chart["DF"] = (1+infl_rate)**df_chart["Year"]
-        # Standard Cols
         for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense", "ContribYear"]:
             df_chart[c] /= df_chart["DF"]
-        # Breakdown Cols
         for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear"]:
             df_chart[c] /= df_chart["DF"]
 
     # 5. Plot (In Left Column)
     with viz_col:
         plot_end = retirement_age
-        # If using custom stop logic (like is_early), we cap at retirement_age to avoid overshoot unless early is actually later (unlikely)
         
         df_p = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
         
         fig = go.Figure()
-        # Main Balance (Stacked Bar)
+        # Main Balance
         fig.add_trace(go.Bar(
             x=df_p["Age"], y=df_p["Balance"], 
             name="Invested Assets",
             marker_color='rgba(58, 110, 165, 0.8)', # Strong Blue
             hovertemplate="$%{y:,.0f}"
         ))
-        # Home Equity (Stacked Bar)
+        # Home Equity
         fig.add_trace(go.Bar(
             x=df_p["Age"], y=df_p["HomeEquity"], 
             name="Home Equity",
@@ -1104,7 +1033,6 @@ def main():
             hovertemplate="$%{y:,.0f}"
         ))
         
-        # Add Millionaire Milestone Dot
         milestone = df_p[df_p["NetWorth"] >= 1000000]
         if not milestone.empty:
             m_row = milestone.iloc[0]
@@ -1119,7 +1047,6 @@ def main():
                 showlegend=False
             ))
         
-        # Final Number Annotation
         if not df_p.empty:
             final_row = df_p.iloc[-1]
             fig.add_annotation(
@@ -1138,18 +1065,17 @@ def main():
                 borderwidth=1
             )
         
-        # Target Line
         target_val = fi_target_bal
         if show_real and infl_rate > 0: target_val = fi_annual_spend_today / base_swr_30yr
         
-        # Visual Polish
         fig.update_layout(
-            title="Net Worth Projection",
+            # UPDATED TITLE SIZE AND BOLDNESS
+            title=dict(text="<b>Net Worth Projection</b>", font=dict(size=24)),
             xaxis_title="Age", yaxis_title="Value ($)",
             barmode='stack',
             hovermode="x unified",
             legend=dict(orientation="h", y=1.02, x=0.01),
-            margin=dict(l=20, r=20, t=40, b=20),
+            margin=dict(l=20, r=20, t=60, b=20),
             height=400,
             yaxis=dict(tickformat=",.0f")
         )
@@ -1161,21 +1087,18 @@ def main():
     
     with tab1:
         st.caption("How market volatility (+/- 1% annual return) impacts your outcome.")
-        # Pre-calc scenarios
         rates_bear = [r - 0.01 for r in annual_rates_by_year_full]
         rates_bull = [r + 0.01 for r in annual_rates_by_year_full]
         
         df_bear = compound_schedule(start_balance_effective, years_full, monthly_contrib_chart, annual_expense_chart, annual_rate_by_year=rates_bear, use_yearly_compounding=use_yearly)
         df_bull = compound_schedule(start_balance_effective, years_full, monthly_contrib_chart, annual_expense_chart, annual_rate_by_year=rates_bull, use_yearly_compounding=use_yearly)
         
-        # Add home equity & adjust real
         for df_ in [df_bear, df_bull]:
             df_["Age"] = current_age + df_["Year"]
             df_["NW"] = df_["Balance"] + home_equity_by_year_full
             if show_real and infl_rate > 0:
                 df_["NW"] /= ((1+infl_rate)**df_["Year"])
         
-        # Plot Cone
         df_bear_p = df_bear[df_bear["Age"] <= plot_end]
         df_bull_p = df_bull[df_bull["Age"] <= plot_end]
         
@@ -1192,7 +1115,6 @@ def main():
         with c1:
             st.markdown("**Income vs Expenses (Real)**")
             fig_i = go.Figure()
-            # ADDED GROSS INCOME TRACE
             fig_i.add_trace(go.Scatter(x=df_income["Age"], y=df_income["IncomeRealBeforeTax"], name="Gross Income", line=dict(color="#90A4AE", dash="dot"), hovertemplate="$%{y:,.0f}"))
             fig_i.add_trace(go.Scatter(x=df_income["Age"], y=df_income["IncomeRealAfterTax"], name="Net Income", line=dict(color="#66BB6A"), hovertemplate="$%{y:,.0f}"))
             fig_i.add_trace(go.Scatter(x=df_income["Age"], y=df_income["ExpensesReal"], name="Expenses", line=dict(color="#EF5350"), hovertemplate="$%{y:,.0f}"))
@@ -1210,7 +1132,7 @@ def main():
         fig_s = go.Figure()
         fig_s.add_trace(go.Scatter(
             x=df_income["Age"], 
-            y=df_income["SavingsRate"] * 100, # Convert to % for display if stored as decimal
+            y=df_income["SavingsRate"] * 100, 
             mode='lines', 
             name="Savings Rate", 
             line=dict(color="#42A5F5"),
@@ -1260,7 +1182,6 @@ def main():
         * $\\text{Withdrawals}$ (`TotalPortfolioDraw`): Money taken OUT of the portfolio (includes Retirement Spending + Taxes + Kids + Cars + Home).
         """)
         
-        # Prepare table data
         format_dict_d = {
             "Balance": "${:,.0f}",
             "NetWorth": "${:,.0f}",
@@ -1277,15 +1198,13 @@ def main():
             "Age": "{:.0f}"
         }
         
-        # Filter to relevant columns
         cols = [
             "Age", 
             "AnnualRate",
             "InvestGrowthYear",
-            "ContribYear", # NEW: Added so the math balances
+            "ContribYear", 
             "TotalPortfolioDraw",
             "Balance",
-            # Breakdown cols
             "LivingWithdrawal", 
             "TaxPenalty", 
             "KidCost", 
