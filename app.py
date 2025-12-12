@@ -828,28 +828,39 @@ def main():
         custom_exit_age = st.slider("Custom Early Ret. Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
         
         # Scenario Selector
-        scenario_keys = ["Work"]
+        # Define the available keys (internal IDs) and their display labels
+        scenario_options = ["Work"]
         display_map = {"Work": "Work until Full Retirement"}
         
+        # Only add Barista if valid
         if barista_age:
-            scenario_keys.append("Barista")
+            scenario_options.append("Barista")
             display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
             
-        scenario_keys.append("Custom")
+        scenario_options.append("Custom")
         display_map["Custom"] = f"Custom (Age {custom_exit_age})"
         
-        # We need a default index that is valid
-        default_ix = 0
+        # --- ROBUST STATE MANAGEMENT ---
+        # 1. Get current state, default to "Work"
+        current_selection = st.session_state.get("scenario_selector", "Work")
         
-        # Safety check: If the previously selected option is no longer valid (e.g. Barista became impossible),
-        # reset the session state to avoid a Streamlit error.
-        if "scenario_selector" in st.session_state:
-            if st.session_state.scenario_selector not in scenario_keys:
-                st.session_state.scenario_selector = scenario_keys[0]
+        # 2. Check if current state is valid in the NEW options list
+        if current_selection not in scenario_options:
+            # If invalid (e.g. Barista no longer possible), fall back to Work
+            current_selection = "Work"
+            # Force update session state immediately so the widget renders correctly
+            st.session_state.scenario_selector = current_selection
+            
+        # 3. Determine the index for the widget
+        try:
+            default_ix = scenario_options.index(current_selection)
+        except ValueError:
+            default_ix = 0
         
+        # 4. Render widget
         selected_key = st.selectbox(
             "Select Scenario:", 
-            options=scenario_keys, 
+            options=scenario_options, 
             format_func=lambda x: display_map[x],
             index=default_ix,
             key="scenario_selector"
