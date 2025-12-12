@@ -898,6 +898,7 @@ def main():
     det_cars = []
     det_housing = []
     det_total_portfolio_draw = []
+    detailed_total_spending = []
 
     def to_nom(val, y_idx):
         return val * ((1+infl_rate)**(y_idx)) if (show_real and infl_rate > 0) else val
@@ -972,6 +973,29 @@ def main():
         det_kids.append(exp_kids_nominal[y])
         det_cars.append(exp_cars_nominal[y])
         det_housing.append(exp_housing_nominal[y])
+        
+        # --- TOTAL SPENDING CALCULATION (Independent of Income Source) ---
+        # Calculate nominal base spending first
+        base_spending_nom = 0.0
+        
+        # Inflation factor for manual calc
+        inf_f = (1 + infl_rate) ** y
+        
+        if age < stop_age:
+             # Accumulation Phase: Use Current Expenses + Growth
+             base_spending_nom = expense_today * ((1 + expense_growth_rate) ** y) * inf_f
+        elif is_barista and age < barista_until_age:
+             # Barista Phase
+             base_spending_nom = barista_spend_today * inf_f
+        else:
+             # Retirement Phase
+             base_spending_nom = fi_annual_spend_today * inf_f
+             
+        # Add Lumpy Expenses (Already nominal) + Tax Penalty
+        # Note: TaxPenalty is calculated above in retirement logic (0 otherwise)
+        lumpy_total = exp_kids_nominal[y] + exp_cars_nominal[y] + exp_housing_nominal[y] + (det_tax_penalty[-1] if det_tax_penalty else 0.0)
+        
+        detailed_total_spending.append(base_spending_nom + lumpy_total)
 
     # 4. Generate Chart DF
     df_chart = compound_schedule(
@@ -992,6 +1016,7 @@ def main():
     df_chart["KidCost"] = det_kids
     df_chart["CarCost"] = det_cars
     df_chart["HomeCost"] = det_housing
+    df_chart["TotalSpending"] = detailed_total_spending
 
     # Real Adjustment
     if show_real and infl_rate > 0:
@@ -999,7 +1024,7 @@ def main():
         df_chart["DF"] = (1+infl_rate)**(df_chart["Year"] - 1)
         for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense", "StartBalance", "EndBalance"]:
             df_chart[c] /= df_chart["DF"]
-        for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear", "ContribYear"]:
+        for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear", "ContribYear", "TotalSpending"]:
             df_chart[c] /= df_chart["DF"]
 
     # --- DYNAMIC FUTURE INCOME KPI ---
@@ -1394,14 +1419,8 @@ def main():
         
         # Add Total Spending Column (Portfolio Draws + Active Income Used)
         # This reflects the total lifestyle cost (Spending).
-        df_p["TotalSpending"] = (
-            df_p["LivingWithdrawal"] + 
-            df_p["TaxPenalty"] + 
-            df_p["KidCost"] + 
-            df_p["CarCost"] + 
-            df_p["HomeCost"] + 
-            df_p["ScenarioActiveIncome"]
-        )
+        # Note: We use the pre-calculated detailed_total_spending to ensure it matches
+        # consumption rather than just Income + Withdrawal.
 
         format_dict_d = {
             "StartBalance": "${:,.0f}",
