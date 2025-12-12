@@ -841,11 +841,18 @@ def main():
         # We need a default index that is valid
         default_ix = 0
         
+        # Safety check: If the previously selected option is no longer valid (e.g. Barista became impossible),
+        # reset the session state to avoid a Streamlit error.
+        if "scenario_selector" in st.session_state:
+            if st.session_state.scenario_selector not in scenario_keys:
+                st.session_state.scenario_selector = scenario_keys[0]
+        
         selected_key = st.selectbox(
             "Select Scenario:", 
             options=scenario_keys, 
             format_func=lambda x: display_map[x],
-            index=default_ix
+            index=default_ix,
+            key="scenario_selector"
         )
 
     # --- DETERMINE SCENARIO LOGIC (Moved up for Chart & KPI) ---
