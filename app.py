@@ -554,7 +554,7 @@ def main():
             # Maintenance & Apprec defaults
             maintenance_pct = 0.01
             home_app_rate = 0.03
-            current_rent = st.number_input("Current Rent", value=1500, help="This rent amount is removed from your annual expenses if you buy a home, helping offset the new mortgage cost.") 
+            current_rent = st.number_input("Current Rent/Mortgage (Planning to Buy ONLY)", value=1500, help="This rent amount is removed from your annual expenses if you buy a home, helping offset the new mortgage cost.") 
             est_prop_tax_monthly = st.number_input("Tax/Ins ($/mo)", value=300)
 
     # 4. Assumptions
@@ -1236,4 +1236,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
