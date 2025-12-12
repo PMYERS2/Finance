@@ -768,9 +768,9 @@ def main():
 
     with kpi_container:
         # Layout: 2 Main Sections side-by-side to save vertical space
-        # Left Section (FIRE) takes ~60%, Right Section (Traditional) takes ~40%
+        # Left Section (FIRE) takes ~50%, Right Section (Traditional) takes ~50%
         
-        sec_fire, sec_gap, sec_trad = st.columns([1.6, 0.1, 1.1])
+        sec_fire, sec_gap, sec_trad = st.columns([1, 0.05, 1])
         
         with sec_fire:
             st.markdown('<div class="compact-header">🚀 FIRE Goals (Start of Year Balances)</div>', unsafe_allow_html=True)
@@ -779,12 +779,22 @@ def main():
             # Regular FIRE
             val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
             color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
-            render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", "Based on Safe Withdrawal Rate.")
+            if fi_age_regular:
+                swr_r = get_dynamic_swr(fi_age_regular, base_swr_30yr)
+                desc_reg = f"Based on {swr_r*100:.2f}% Safe Withdrawal Rate."
+            else:
+                desc_reg = "Target not reached."
+            render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", desc_reg)
 
             # Barista FIRE
             val_bar = str(barista_age) if barista_age else "N/A"
             color_bar = "#0D47A1" if barista_age else "#CC0000"
-            render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", f"Switch to ${barista_income_today/1000:.0f}k job.")
+            if barista_age:
+                swr_b = get_dynamic_swr(barista_age, base_swr_30yr)
+                desc_bar = f"Switch to ${barista_income_today/1000:.0f}k job. Gap SWR: {swr_b*100:.2f}%"
+            else:
+                desc_bar = "N/A"
+            render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", desc_bar)
             
 
         with sec_trad:
@@ -804,7 +814,7 @@ def main():
                 c5, 
                 f"Future Income", 
                 f"${traditional_annual_income:,.0f}", 
-                f"Per year safe draw.",
+                f"Safe draw ({base_swr_30yr*100:.1f}% SWR).",
                 sub_value=f"(${traditional_annual_income/12:,.0f}/mo)"
             )
 
