@@ -565,7 +565,34 @@ def main():
         compounding_type = st.radio("Compounding Frequency", ["Monthly", "Yearly"], index=0, help="Monthly is more precise. Yearly is easier to calculate by hand.")
         use_yearly = (compounding_type == "Yearly")
         
-        annual_rate_base = st.slider("Investment Return (%)", 0.0, 15.0, 9.0, 0.5) / 100.0
+        # --- NEW INVESTMENT STYLE SELECTOR ---
+        st.markdown("**Investment Strategy**")
+        
+        # Map style to the "Anchor Rate" (Return at age 45-55).
+        # Glide path adds +1% for age < 35, and subtracts -1.5% for age > 65.
+        style_map = {
+            "Aggressive (100% Stocks)": 0.09,   # Starts at 10%, drops to 7.5%
+            "Balanced (60/40 Split)": 0.07,     # Starts at 8%, drops to 5.5%
+            "Conservative (Heavy Bonds)": 0.05, # Starts at 6%, drops to 3.5%
+            "Custom": None
+        }
+        
+        invest_style = st.selectbox(
+            "Portfolio Style", 
+            options=list(style_map.keys()), 
+            index=0,
+            help="Sets the baseline return. Rates decrease automatically as you age (Glide Path)."
+        )
+        
+        if invest_style == "Custom":
+            annual_rate_base = st.slider("Anchor Return (%)", 0.0, 15.0, 9.0, 0.5, help="This is the return at age 50. Younger years will be higher (+1%), older years lower (-1.5%).") / 100.0
+        else:
+            annual_rate_base = style_map[invest_style]
+            # Show feedback on what this means for today
+            current_rate_display = glide_path_return(current_age, annual_rate_base) * 100
+            st.caption(f"Current Return (Age {current_age}): **{current_rate_display:.1f}%**")
+            st.caption(f"Retirement Return (Age 65+): **{(annual_rate_base - 0.015)*100:.1f}%**")
+
         infl_rate = st.number_input("Inflation (%)", 0.0, 10.0, 3.0, 0.1) / 100.0
         base_swr_30yr = st.number_input("Safe Withdrawal Rate (%)", 1.0, 10.0, 4.0, 0.1) / 100.0
         state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
