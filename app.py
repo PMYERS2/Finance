@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 # =========================================================
-# Core compound interest logic (UNCHANGED)
+# Core compound interest logic
 # =========================================================
 def compound_schedule(
     start_balance,
@@ -13,6 +13,7 @@ def compound_schedule(
     annual_expense_by_year,
     annual_rate=None,
     annual_rate_by_year=None,
+    use_yearly_compounding=False # NEW ARGUMENT
 ):
     if annual_rate_by_year is not None and len(annual_rate_by_year) != years:
         raise ValueError("annual_rate_by_year length must equal 'years'")
@@ -29,21 +30,35 @@ def compound_schedule(
         else:
             r = annual_rate if annual_rate is not None else 0.0
 
-        m = 12
         balance_start_year = balance
         contrib_year = 0.0
         growth_year_sum = 0.0
 
-        # Monthly Compounding Loop
-        for _ in range(m):
-            monthly_contrib = monthly_contrib_by_year[year_idx]
-            balance += monthly_contrib
-            cum_contrib += monthly_contrib
-            contrib_year += monthly_contrib
+        if use_yearly_compounding:
+            # --- YEARLY COMPOUNDING LOGIC (Simplified for hand-math) ---
+            # 1. Growth is calculated on the starting balance only
+            growth_year_sum = balance * r
+            balance += growth_year_sum
+            
+            # 2. Add contributions (Assumed End-of-Year lump sum for simple math)
+            monthly_val = monthly_contrib_by_year[year_idx]
+            annual_contrib = monthly_val * 12.0
+            balance += annual_contrib
+            
+            contrib_year = annual_contrib
+            cum_contrib += annual_contrib
+        else:
+            # --- MONTHLY COMPOUNDING LOGIC (Standard) ---
+            m = 12
+            for _ in range(m):
+                monthly_contrib = monthly_contrib_by_year[year_idx]
+                balance += monthly_contrib
+                cum_contrib += monthly_contrib
+                contrib_year += monthly_contrib
 
-            growth_month = balance * (r / m)
-            balance += growth_month
-            growth_year_sum += growth_month
+                growth_month = balance * (r / m)
+                balance += growth_month
+                growth_year_sum += growth_month
 
         balance_before_expense = balance
         annual_expense = annual_expense_by_year[year_idx]
@@ -88,7 +103,8 @@ def simulate_period_exact(
     monthly_contrib_real,
     infl_rate,
     tax_rate=0.0,
-    early_withdrawal_tax_rate=0.0
+    early_withdrawal_tax_rate=0.0,
+    use_yearly_compounding=False
 ):
     balance = start_balance_nominal
     
@@ -99,7 +115,6 @@ def simulate_period_exact(
             break
             
         r_nominal = annual_rates_full[year_idx]
-        monthly_rate = r_nominal / 12.0
         
         years_from_now = year_idx + 1 
         infl_factor = (1 + infl_rate) ** years_from_now
@@ -117,7 +132,6 @@ def simulate_period_exact(
         net_draw_nominal = base_expense_nominal
         
         # 4. Early Withdrawal Penalty Logic (Age < 60)
-        # If we are withdrawing (net_draw > 0) and under 60, we gross up the withdrawal
         final_withdrawal_nominal = 0.0
         
         if net_draw_nominal > 0:
@@ -126,15 +140,21 @@ def simulate_period_exact(
             else:
                 final_withdrawal_nominal = net_draw_nominal
         else:
-            # We have a surplus, add it to balance (negative withdrawal)
             final_withdrawal_nominal = net_draw_nominal 
 
-        # Compounding
-        for _ in range(12):
-            balance += contrib_nominal
-            balance += balance * monthly_rate
-            
-        balance -= final_withdrawal_nominal
+        if use_yearly_compounding:
+            # Yearly Logic: Grow start balance, then add contribs, subtract withdrawal
+            growth = balance * r_nominal
+            balance += growth
+            balance += (contrib_nominal * 12.0)
+            balance -= final_withdrawal_nominal
+        else:
+            # Monthly Logic
+            monthly_rate = r_nominal / 12.0
+            for _ in range(12):
+                balance += contrib_nominal
+                balance += balance * monthly_rate
+            balance -= final_withdrawal_nominal
         
         if balance < 0:
             balance = 0.0
@@ -152,7 +172,8 @@ def compute_bridge_age(
     show_real,
     withdrawal_needed_real,
     terminal_target_real_at_60,
-    early_withdrawal_tax_rate
+    early_withdrawal_tax_rate,
+    use_yearly_compounding
 ):
     # 1. Map Age -> Nominal Baseline Balance
     balance_nominal_by_age = {}
@@ -188,7 +209,8 @@ def compute_bridge_age(
             monthly_contrib_real=0.0,
             infl_rate=infl_rate,
             tax_rate=0.0,
-            early_withdrawal_tax_rate=early_withdrawal_tax_rate
+            early_withdrawal_tax_rate=early_withdrawal_tax_rate,
+            use_yearly_compounding=use_yearly_compounding
         )
 
         if proj_bal_at_60_nominal >= target_nominal_at_60:
@@ -201,7 +223,7 @@ def compute_bridge_age(
 def compute_coast_fi_age(
     df_full, current_age, start_balance_input, fi_annual_spend_today,
     infl_rate, show_real, base_30yr_swr, retirement_age, annual_rates_by_year_full,
-    early_withdrawal_tax_rate
+    early_withdrawal_tax_rate, use_yearly_compounding
 ):
     if fi_annual_spend_today <= 0 or base_30yr_swr <= 0 or df_full is None:
         return None, None, None, None
@@ -211,7 +233,7 @@ def compute_coast_fi_age(
     age, bal = compute_bridge_age(
         df_full, current_age, retirement_age, start_balance_input, annual_rates_by_year_full,
         infl_rate, show_real, 0.0, target_at_60,
-        early_withdrawal_tax_rate
+        early_withdrawal_tax_rate, use_yearly_compounding
     )
     
     return age, bal, target_at_60, base_30yr_swr
@@ -220,7 +242,7 @@ def compute_coast_fi_age(
 def compute_regular_fi_age(
     df_full, current_age, start_balance_input, fi_annual_spend_today,
     infl_rate, show_real, base_swr, retirement_age, annual_rates_by_year_full,
-    early_withdrawal_tax_rate
+    early_withdrawal_tax_rate, use_yearly_compounding
 ):
     if fi_annual_spend_today <= 0 or base_swr <= 0 or df_full is None:
         return None, None
@@ -230,7 +252,7 @@ def compute_regular_fi_age(
     age, bal = compute_bridge_age(
         df_full, current_age, retirement_age, start_balance_input, annual_rates_by_year_full,
         infl_rate, show_real, fi_annual_spend_today, target_at_60,
-        early_withdrawal_tax_rate
+        early_withdrawal_tax_rate, use_yearly_compounding
     )
     
     return age, target_at_60
@@ -239,7 +261,7 @@ def compute_regular_fi_age(
 def compute_barista_fi_age(
     df_full, current_age, start_balance_input, fi_annual_spend_today, barista_income_today,
     infl_rate, show_real, base_swr, retirement_age, annual_rates_by_year_full,
-    early_withdrawal_tax_rate
+    early_withdrawal_tax_rate, use_yearly_compounding
 ):
     gap = max(0, fi_annual_spend_today - barista_income_today)
     if gap == 0:
@@ -253,7 +275,7 @@ def compute_barista_fi_age(
     age, bal = compute_bridge_age(
         df_full, current_age, retirement_age, start_balance_input, annual_rates_by_year_full,
         infl_rate, show_real, gap, target_at_60,
-        early_withdrawal_tax_rate
+        early_withdrawal_tax_rate, use_yearly_compounding
     )
     
     return age, target_at_60
@@ -440,6 +462,13 @@ def main():
         padding-bottom: 5px;
         border-bottom: 2px solid #f0f0f0;
     }
+    .formula-box {
+        background-color: #e8f5e9;
+        border-left: 5px solid #2e7d32;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -533,6 +562,9 @@ def main():
             est_prop_tax_monthly = st.number_input("Tax/Ins ($/mo)", value=300)
 
     with st.sidebar.expander("Assumptions & Adjustments", expanded=False):
+        compounding_type = st.radio("Compounding Frequency", ["Monthly", "Yearly"], index=0, help="Monthly is more precise. Yearly is easier to calculate by hand.")
+        use_yearly = (compounding_type == "Yearly")
+        
         annual_rate_base = st.slider("Investment Return (%)", 0.0, 15.0, 9.0, 0.5) / 100.0
         infl_rate = st.number_input("Inflation (%)", 0.0, 10.0, 3.0, 0.1) / 100.0
         base_swr_30yr = st.number_input("Safe Withdrawal Rate (%)", 1.0, 10.0, 4.0, 0.1) / 100.0
@@ -676,7 +708,8 @@ def main():
     # Full Simulation (Baseline)
     df_full = compound_schedule(
         start_balance_effective, years_full, monthly_contrib_by_year_full,
-        annual_expense_by_year_nominal_full, annual_rate_by_year=annual_rates_by_year_full
+        annual_expense_by_year_nominal_full, annual_rate_by_year=annual_rates_by_year_full,
+        use_yearly_compounding=use_yearly
     )
     df_full["Age"] = current_age + df_full["Year"] - 1
     df_full["Balance"] = df_full["Balance"] # Nominal
@@ -685,17 +718,17 @@ def main():
     coast_age, _, _, _ = compute_coast_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, 
         infl_rate, show_real, base_swr_30yr, retirement_age, annual_rates_by_year_full,
-        early_withdrawal_tax_rate
+        early_withdrawal_tax_rate, use_yearly
     )
     fi_age_regular, fi_target_bal = compute_regular_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, 
         infl_rate, show_real, base_swr_30yr, retirement_age, annual_rates_by_year_full,
-        early_withdrawal_tax_rate
+        early_withdrawal_tax_rate, use_yearly
     )
     barista_age, _ = compute_barista_fi_age(
         df_full, current_age, start_balance_effective, fi_annual_spend_today, barista_income_today, 
         infl_rate, show_real, base_swr_30yr, retirement_age, annual_rates_by_year_full,
-        early_withdrawal_tax_rate
+        early_withdrawal_tax_rate, use_yearly
     )
 
     # --- EXTRA KPI: TRADITIONAL RETIREMENT OUTCOME ---
@@ -995,7 +1028,8 @@ def main():
     # 4. Generate Chart DF
     df_chart = compound_schedule(
         start_balance_effective, years_full, monthly_contrib_chart,
-        annual_expense_chart, annual_rate_by_year=annual_rates_by_year_full
+        annual_expense_chart, annual_rate_by_year=annual_rates_by_year_full,
+        use_yearly_compounding=use_yearly
     )
     df_chart["Age"] = current_age + df_chart["Year"]
     df_chart["HomeEquity"] = home_equity_by_year_full
@@ -1096,7 +1130,7 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
 
     # --- TABS FOR DETAILS ---
-    tab1, tab2, tab3, tab4 = st.tabs(["Risk Analysis", "Cash Flow Details", "Audit Table", "Detailed Schedule"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Risk Analysis", "Cash Flow Details", "Audit & Manual Math", "Detailed Schedule"])
     
     with tab1:
         st.caption("How market volatility (+/- 1% annual return) impacts your outcome.")
@@ -1104,8 +1138,8 @@ def main():
         rates_bear = [r - 0.01 for r in annual_rates_by_year_full]
         rates_bull = [r + 0.01 for r in annual_rates_by_year_full]
         
-        df_bear = compound_schedule(start_balance_effective, years_full, monthly_contrib_chart, annual_expense_chart, annual_rate_by_year=rates_bear)
-        df_bull = compound_schedule(start_balance_effective, years_full, monthly_contrib_chart, annual_expense_chart, annual_rate_by_year=rates_bull)
+        df_bear = compound_schedule(start_balance_effective, years_full, monthly_contrib_chart, annual_expense_chart, annual_rate_by_year=rates_bear, use_yearly_compounding=use_yearly)
+        df_bull = compound_schedule(start_balance_effective, years_full, monthly_contrib_chart, annual_expense_chart, annual_rate_by_year=rates_bull, use_yearly_compounding=use_yearly)
         
         # Add home equity & adjust real
         for df_ in [df_bear, df_bull]:
@@ -1164,7 +1198,55 @@ def main():
         st.plotly_chart(fig_s, use_container_width=True)
 
     with tab3:
-        st.write("Detailed yearly breakdown.")
+        st.markdown(f"**Manual Calculation Guide ({compounding_type} Mode)**")
+        st.caption("Use this formula to verify the numbers in the 'Detailed Schedule' tab yourself.")
+        
+        if use_yearly:
+            st.markdown("""
+            ### 🧮 Yearly Compounding Formula
+            In this mode, math is simplified so you can verify it with a basic calculator.
+            
+            **Step 1:** Start with **Previous Year Balance**
+            
+            **Step 2:** Calculate Growth
+            $$
+            \\text{Growth} = \\text{Previous Balance} \\times \\text{Annual Rate}
+            $$
+            *(Note: Interest is calculated only on the starting balance for simplicity)*
+            
+            **Step 3:** Add Contributions (Lump sum)
+            $$
+            \\text{Total Contributions} = \\text{Monthly Savings} \\times 12
+            $$
+            
+            **Step 4:** Subtract Expenses/Drawdowns
+            $$
+            \\text{Total Draw} = \\text{Expenses} + \\text{Taxes}
+            $$
+            
+            **Final Balance:**
+            $$
+            \\text{New Balance} = \\text{Previous Balance} + \\text{Growth} + \\text{Total Contributions} - \\text{Total Draw}
+            $$
+            """)
+        else:
+            st.markdown("""
+            ### 📅 Monthly Compounding Formula (Precise)
+            In this mode, interest compounds every month. This yields slightly higher results than the yearly simplified method.
+            
+            **Process (Repeated 12 times per year):**
+            1. Add Monthly Contribution.
+            2. Calculate Monthly Interest: $\\text{Balance} \\times (\\text{Annual Rate} / 12)$.
+            3. Add Interest to Balance.
+            4. Repeat for next month.
+            
+            **At Year End:**
+            Subtract Total Annual Expenses/Drawdowns.
+            """)
+            
+        st.write("---")
+        st.write("### Data Table")
+        
         format_dict = {
             "Balance": "${:,.0f}",
             "HomeEquity": "${:,.0f}", 
