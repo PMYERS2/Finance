@@ -1171,10 +1171,38 @@ def main():
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Income vs Expenses (Real)**")
+            
+            # --- CUSTOM LOGIC FOR GRAPH EXPENSES ---
+            # df_income has the smooth expenses. 
+            # We want to add the lumpy expenses from df_chart (KidCost, CarCost, etc) to it.
+            # 1. Slice df_chart to match df_income length
+            limit = len(df_income)
+            lumpy_expenses = (
+                df_chart.loc[:limit-1, "KidCost"] + 
+                df_chart.loc[:limit-1, "CarCost"] + 
+                df_chart.loc[:limit-1, "HomeCost"] + 
+                df_chart.loc[:limit-1, "TaxPenalty"]
+            ).fillna(0.0)
+            
+            # 2. Add to base real expenses
+            # Note: df_income["ExpensesReal"] is already adjusted for inflation logic (Real vs Nominal)
+            # df_chart columns are also adjusted at the end of the script using "DF".
+            # So we can just add them directly.
+            total_real_expenses_for_graph = df_income["ExpensesReal"] + lumpy_expenses
+            
             fig_i = go.Figure()
             fig_i.add_trace(go.Scatter(x=df_income["Age"], y=df_income["IncomeRealBeforeTax"], name="Gross Income", line=dict(color="#90A4AE", dash="dot"), hovertemplate="$%{y:,.0f}"))
             fig_i.add_trace(go.Scatter(x=df_income["Age"], y=df_income["IncomeRealAfterTax"], name="Net Income", line=dict(color="#66BB6A"), hovertemplate="$%{y:,.0f}"))
-            fig_i.add_trace(go.Scatter(x=df_income["Age"], y=df_income["ExpensesReal"], name="Expenses", line=dict(color="#EF5350"), hovertemplate="$%{y:,.0f}"))
+            
+            # UPDATED: Use the new total expense series
+            fig_i.add_trace(go.Scatter(
+                x=df_income["Age"], 
+                y=total_real_expenses_for_graph, 
+                name="Total Expenses", 
+                line=dict(color="#EF5350"), 
+                hovertemplate="$%{y:,.0f}"
+            ))
+            
             fig_i.update_layout(height=250, margin=dict(t=20, b=20, l=20, r=20), yaxis=dict(tickformat=",.0f"))
             st.plotly_chart(fig_i, use_container_width=True)
         with c2:
@@ -1234,6 +1262,15 @@ def main():
         Note: The **StartBalance** of the next row (Age + 1) equals the **EndBalance** of the current row.
         """)
         
+        # Add Total Expenses Column for transparency (Sum of withdrawal components)
+        df_p["TotalExpenses"] = (
+            df_p["LivingWithdrawal"] + 
+            df_p["TaxPenalty"] + 
+            df_p["KidCost"] + 
+            df_p["CarCost"] + 
+            df_p["HomeCost"]
+        )
+
         format_dict_d = {
             "StartBalance": "${:,.0f}",
             "EndBalance": "${:,.0f}",
@@ -1246,24 +1283,27 @@ def main():
             "ScenarioActiveIncome": "${:,.0f}",
             "InvestGrowthYear": "${:,.0f}",
             "ContribYear": "${:,.0f}",
+            "TotalExpenses": "${:,.0f}",
             "AnnualRate": "{:.2%}",
             "Age": "{:.0f}"
         }
         
+        # UPDATED COLUMN ORDERING AS REQUESTED
         cols = [
             "Age", 
             "StartBalance",
             "AnnualRate",
             "InvestGrowthYear",
             "ContribYear", 
-            "TotalPortfolioDraw",
+            # "TotalPortfolioDraw", # Removed to reduce clutter in favor of itemized list
             "EndBalance",
-            # "LivingWithdrawal", 
-            # "TaxPenalty", 
-            # "KidCost", 
-            # "CarCost", 
-            # "HomeCost",
-            # "ScenarioActiveIncome"
+            "TotalExpenses",
+            "LivingWithdrawal", 
+            "TaxPenalty", 
+            "KidCost", 
+            "CarCost", 
+            "HomeCost",
+            "ScenarioActiveIncome"
         ]
         
         st.dataframe(
