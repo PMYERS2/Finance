@@ -676,6 +676,37 @@ def main():
         else:
             car_cost_today, first_car_age, car_interval_years = 0,0,0
 
+    # 5. Simulation Scenario (MOVED TO SIDEBAR)
+    with st.sidebar.expander("5. Simulation Scenario", expanded=True):
+        st.markdown("**Visualize Scenario**")
+        
+        use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
+        
+        # Custom Early Retirement Slider
+        default_exit = fi_age_regular if fi_age_regular else 55
+        custom_exit_age = st.slider("Custom Early Ret. Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
+        
+        # Scenario Selector
+        scenario_keys = ["Work"]
+        display_map = {"Work": "Work until Full Retirement"}
+        
+        if barista_age:
+            scenario_keys.append("Barista")
+            display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
+            
+        scenario_keys.append("Custom")
+        display_map["Custom"] = f"Custom (Age {custom_exit_age})"
+        
+        # We need a default index that is valid
+        default_ix = 0
+        
+        selected_key = st.selectbox(
+            "Select Scenario:", 
+            options=scenario_keys, 
+            format_func=lambda x: display_map[x],
+            index=default_ix
+        )
+
     # --- CALCULATION ENGINE ---
     
     df_income = build_income_schedule(
@@ -810,149 +841,10 @@ def main():
         infl_rate, base_swr_30yr, barista_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly
     )
 
-    # --- EXTRA KPI: TRADITIONAL RETIREMENT OUTCOME ---
-    traditional_row = df_full[df_full["Age"] == retirement_age]
-    traditional_balance_display = 0.0
-    traditional_annual_income = 0.0
-    
-    if not traditional_row.empty:
-        # Use StartBalance at Retirement Age
-        bal_nom = traditional_row.iloc[0]["StartBalance"]
-        
-        y_idx = retirement_age - current_age
-        # The living expense we need to cover starts at the beginning of that year
-        expense_inflation_exponent = (retirement_age - current_age) 
-        living_expense_nominal_that_year = fi_annual_spend_today * ((1+infl_rate)**expense_inflation_exponent)
-        
-        # Adjust the balance to match graph logic (subtracted during the year?) 
-        # Actually for Traditional start-of-year balance, we just display the pot size.
-        bal_nom_aligned = bal_nom
-        
-        # Deflate if necessary
-        if show_real and infl_rate > 0:
-            display_deflator = (1 + infl_rate) ** (retirement_age - current_age)
-            traditional_balance_display = bal_nom_aligned / display_deflator
-        else:
-            traditional_balance_display = bal_nom_aligned
-            
-        # Calculate Safe annual income from that pot
-        traditional_annual_income = traditional_balance_display * base_swr_30yr
-
-
-    # --- TOP ROW: THE VERDICT (Redesigned for Single Screen) ---
-    
-    def render_card(col, title, value, desc, sub_value=None):
-        sub_html = f"<div style='font-size:12px; font-weight:600; color:#2E7D32; margin-top:2px;'>{sub_value}</div>" if sub_value else ""
-        
-        html_content = (
-            f'<div class="kpi-card">'
-            f'<div class="kpi-title">{title}</div>'
-            f'<div class="kpi-value">{value}</div>'
-            f'{sub_html}'
-            f'<div class="kpi-subtitle">{textwrap.shorten(desc, width=60, placeholder="...")}</div>'
-            f'</div>'
-        )
-        
-        with col:
-            st.markdown(html_content, unsafe_allow_html=True)
-
-    with kpi_container:
-        # Layout: 2 Main Sections side-by-side to save vertical space
-        # Left Section (FIRE) takes ~50%, Right Section (Traditional) takes ~50%
-        
-        sec_fire, sec_gap, sec_trad = st.columns([1, 0.05, 1])
-        
-        with sec_fire:
-            st.markdown('<div class="compact-header">🚀 FIRE Goals (Start of Year Balances)</div>', unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            
-            # Regular FIRE
-            val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
-            color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
-            if fi_age_regular:
-                swr_r = get_dynamic_swr(fi_age_regular, base_swr_30yr)
-                desc_reg = f"Based on {swr_r*100:.2f}% Safe Withdrawal Rate."
-            else:
-                desc_reg = "Target not reached."
-            render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", desc_reg)
-
-            # Barista FIRE
-            val_bar = str(barista_age) if barista_age else "N/A"
-            color_bar = "#0D47A1" if barista_age else "#CC0000"
-            if barista_age:
-                # swr_b is determined by the end age usually, but for display:
-                desc_bar = f"Switch to ${barista_income_today/1000:.0f}k job until age {barista_until_age}."
-            else:
-                desc_bar = "N/A"
-            render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", desc_bar)
-            
-
-        with sec_trad:
-            st.markdown(f'<div class="compact-header">👴 Traditional (Age {retirement_age})</div>', unsafe_allow_html=True)
-            c4, c5 = st.columns(2)
-
-            # Traditional Pot
-            render_card(
-                c4, 
-                f"Nest Egg", 
-                f"${traditional_balance_display:,.0f}", 
-                "Projected balance."
-            )
-            
-            # Traditional Income
-            render_card(
-                c5, 
-                f"Future Income", 
-                f"${traditional_annual_income:,.0f}", 
-                f"Safe draw ({base_swr_30yr*100:.1f}% SWR).",
-                sub_value=f"(${traditional_annual_income/12:,.0f}/mo)"
-            )
-
-
-    # --- MAIN VISUALIZATION CONTROLS & LAYOUT ---
-    
-    # Use st.markdown to create a small vertical spacer instead of "---" if needed
-    st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-    
-    viz_col, control_col = st.columns([3, 1])
-    
-    # 1. Define Controls in Right Column
-    with control_col:
-        st.markdown("**Scenario Settings**")
-        use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
-        
-        # Custom Early Retirement Slider
-        default_exit = fi_age_regular if fi_age_regular else 55
-        custom_exit_age = st.slider("Custom Early Ret. Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
-        
-        # Scenario Selector
-        scenario_keys = ["Work"]
-        display_map = {"Work": "Work until Full Retirement"}
-        
-        if barista_age:
-            scenario_keys.append("Barista")
-            display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
-            
-        scenario_keys.append("Custom")
-        display_map["Custom"] = f"Custom (Age {custom_exit_age})"
-        
-        current_selection = st.session_state.get("scenario_selector", "Work")
-        try:
-            default_ix = scenario_keys.index(current_selection)
-        except ValueError:
-            default_ix = 0
-
-        selected_key = st.selectbox(
-            "Visualize Scenario:", 
-            options=scenario_keys, 
-            format_func=lambda x: display_map[x],
-            index=default_ix,
-            key="scenario_selector"
-        )
-
-    # 2. Logic for Scenario
+    # --- DETERMINE SCENARIO LOGIC (Moved up for Chart & KPI) ---
     stop_age = retirement_age # Default
     is_coast, is_barista, is_early = False, False, False
+    scenario_label = display_map[selected_key]
     
     if selected_key == "Barista":
         stop_age = barista_age
@@ -963,11 +855,8 @@ def main():
             is_barista = True
         else:
             is_early = True
-            
-    # Update Label for Charts
-    scenario_label = display_map[selected_key]
 
-    # 3. Build Chart Data
+    # --- BUILD CHART DATA (Now available for KPIs) ---
     monthly_contrib_chart = []
     annual_expense_chart = list(annual_expense_by_year_nominal_full) 
     
@@ -1061,7 +950,6 @@ def main():
         use_yearly_compounding=use_yearly
     )
     df_chart["Age"] = current_age + df_chart["Year"] - 1
-    # VITAL: Map Balance to StartBalance for visuals
     df_chart["Balance"] = df_chart["StartBalance"]
     
     df_chart["HomeEquity"] = home_equity_by_year_full
@@ -1084,9 +972,99 @@ def main():
         for c in ["ScenarioActiveIncome", "TotalPortfolioDraw", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "InvestGrowthYear", "ContribYear"]:
             df_chart[c] /= df_chart["DF"]
 
+    # --- DYNAMIC FUTURE INCOME KPI ---
+    
+    # 1. Determine "Full Retirement Start Age" for the selected scenario
+    full_ret_start_age = retirement_age # Default Work
+    if is_barista:
+        full_ret_start_age = barista_until_age
+    elif is_early:
+        full_ret_start_age = stop_age
+    
+    # 2. Get Balance at that age from df_chart
+    # We look for the row where Age == full_ret_start_age
+    row_at_ret = df_chart[df_chart["Age"] == full_ret_start_age]
+    
+    future_income_val = 0.0
+    future_swr_used = 0.0
+    
+    if not row_at_ret.empty:
+        final_balance = row_at_ret.iloc[0]["Balance"] # Already Real/Nominal adjusted by loop above
+        future_swr_used = get_dynamic_swr(full_ret_start_age, base_swr_30yr)
+        future_income_val = final_balance * future_swr_used
+        
+    # --- TOP ROW: THE VERDICT (Redesigned for Single Screen) ---
+    
+    def render_card(col, title, value, desc, sub_value=None):
+        sub_html = f"<div style='font-size:12px; font-weight:600; color:#2E7D32; margin-top:2px;'>{sub_value}</div>" if sub_value else ""
+        
+        html_content = (
+            f'<div class="kpi-card">'
+            f'<div class="kpi-title">{title}</div>'
+            f'<div class="kpi-value">{value}</div>'
+            f'{sub_html}'
+            f'<div class="kpi-subtitle">{textwrap.shorten(desc, width=60, placeholder="...")}</div>'
+            f'</div>'
+        )
+        
+        with col:
+            st.markdown(html_content, unsafe_allow_html=True)
+
+    with kpi_container:
+        # Layout: 3 Equal Columns
+        c1, c2, c3 = st.columns(3)
+        
+        # 1. Regular FIRE
+        val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
+        color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
+        if fi_age_regular:
+            swr_r = get_dynamic_swr(fi_age_regular, base_swr_30yr)
+            desc_reg = f"Based on {swr_r*100:.2f}% SWR."
+        else:
+            desc_reg = "Target not reached."
+        render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", desc_reg)
+
+        # 2. Barista FIRE
+        val_bar = str(barista_age) if barista_age else "N/A"
+        color_bar = "#0D47A1" if barista_age else "#CC0000"
+        if barista_age:
+            swr_b = get_dynamic_swr(barista_until_age, base_swr_30yr)
+            desc_bar = f"Gap SWR: {swr_b*100:.2f}%. Work until {barista_until_age}."
+        else:
+            desc_bar = "N/A"
+        render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", desc_bar)
+        
+        # 3. Future Income (Dynamic)
+        scen_name = "Work"
+        if is_barista: scen_name = "Barista"
+        elif is_early: scen_name = "Custom"
+        
+        render_card(
+            c3, 
+            f"Future Income ({scen_name})", 
+            f"${future_income_val:,.0f}", 
+            f"Safe draw at age {full_ret_start_age}.",
+            sub_value=f"(${future_income_val/12:,.0f}/mo)"
+        )
+
+
+    # --- MAIN VISUALIZATION CONTROLS & LAYOUT ---
+    
+    # Use st.markdown to create a small vertical spacer instead of "---" if needed
+    st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+    
+    viz_col, control_col = st.columns([3, 1])
+    
+    # 1. Define Controls in Right Column (Now mostly moved, keeping Chart)
+    # Since we moved controls to Sidebar, we just use this space for something else or merge.
+    # Actually, let's keep the chart full width or use the right col for something small.
+    # The code below uses viz_col for the chart.
+    
     # 5. Plot (In Left Column)
     with viz_col:
-        plot_end = retirement_age
+        # We plot a bit past the "Full Retirement Start" to show the safe phase
+        plot_end = full_ret_start_age + 5 
+        if plot_end > max_sim_age: plot_end = max_sim_age
         
         df_p = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
         
@@ -1154,6 +1132,17 @@ def main():
         )
         
         st.plotly_chart(fig, use_container_width=True)
+        
+    with control_col:
+        st.markdown("**Chart Legend**")
+        st.info(f"Viewing: **{scenario_label}**")
+        if is_barista:
+            st.caption(f"Barista Phase: Age {stop_age} to {barista_until_age}")
+            st.caption(f"Full Retire: Age {barista_until_age}+")
+        elif is_early:
+            st.caption(f"Early Retire: Age {stop_age}+")
+        else:
+            st.caption(f"Work until: Age {retirement_age}")
 
     # --- TABS FOR DETAILS ---
     tab1, tab2, tab3, tab4 = st.tabs(["Risk Analysis", "Cash Flow Details", "Net Worth Table", "Audit Table"])
