@@ -531,13 +531,18 @@ def main():
         st.markdown("""
         ### **How to Use This Dashboard**
         1.  **Configure the Sidebar:** Update your **Age**, **Income**, and **Expenses**. Expand the numbered sections in the sidebar to add lumpy costs like Kids, Cars, or Housing.
-        2.  **Select a Scenario:** Use the **Visualize Scenario** dropdown (on the right side of the chart) to see how early retirement or Barista FIRE changes your net worth.
+        2.  **Select a Scenario:** Use the **Visualize Scenario** dropdown (on the right side of the chart) to see how early retirement or Part-Time work FIRE changes your net worth.
         3.  **Analyze the Data:** Use the **Audit Table** tab at the bottom for a year-by-year "receipt" of how every dollar is calculated.
+
+        ### **Choosing Barista FIRE Effectively**
+        Transitioning to part-time work ("Barista FIRE") requires careful expense planning:
+        * **The Health Care Gap:** When leaving full-time work, your employer likely stops subsidizing your health insurance. You must account for higher premiums and out-of-pocket costs.
+        * **Setting the Spend:** In Sidebar Section 2, use the **'Part-Time Annual Spend'** field to reflect these increased costs. It should likely be **higher** than your current expenses to account for these lost employer subsidies.
 
         ### **Key Assumptions & Disclaimers**
         * **Social Security:** This dashboard **does not** take into account Social Security or private pensions. All income in retirement is assumed to come solely from your invested portfolio.
         * **Inflation Handling:** * **Show Real Dollars (Checked):** Values are shown in today's purchasing power. If your "Future Income" says \$60k, it means you can buy exactly what \$60k buys today.
-            * **Show Real Dollars (Unchecked):** Values are "Nominal." You will see much larger numbers because it includes the literal price increases over time.
+            * **Show Real Dollars (Unchecked):** Values are "Nominal." You will see much larger numbers because it includes literal price increases over time.
         * **Glide Path:** Investment returns are not flat; they automatically decrease as you age to simulate a shift toward safer assets.
         """)
     # -------------------------------------
@@ -1491,6 +1496,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
