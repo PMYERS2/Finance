@@ -558,17 +558,30 @@ def main():
         if p1_pct != 0: promotions[p1_age] = p1_pct
         if p2_pct != 0: promotions[p2_age] = p2_pct
 
-    # 2. Future Goals (Reordered Second)
-    with st.sidebar.expander("2. Future Goals", expanded=False):
-        ret_default = max(60, current_age + 1)
-        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
-        
-        fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
-        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
-        # ADDED NEW INPUT HERE
-        barista_spend_today = st.number_input("Barista Annual Spend ($)", 0, 500000, 50000, step=5000, help="Spending specifically during Barista years. Often lower than full retirement.")
-        barista_until_age = st.number_input("Work Barista Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
+# 2. Future Goals (Reordered Second)
+with st.sidebar.expander("2. Future Goals", expanded=False):
+    ret_default = max(60, current_age + 1)
+    retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, 
+                                     help="The age you plan to stop working if you DON'T retire early (Traditional path).")
+    
+    fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
 
+    st.markdown("---")
+    # --- OPTIONAL BARISTA SECTION ---
+    enable_barista = st.toggle("Include a Part-Time (Barista) Phase?", value=False, 
+                               help="Check this to model a period where you work less before full retirement.")
+
+    # Initialize defaults so the rest of your script doesn't error out
+    barista_income_today = 0
+    barista_spend_today = fi_annual_spend_today # Default to retirement spend if not specified
+    barista_until_age = retirement_age
+
+    if enable_barista:
+        barista_income_today = st.number_input("Part-Time Income Goal ($)", 0, 200000, 30000, step=5000)
+        barista_spend_today = st.number_input("Part-Time Annual Spend ($)", 0, 500000, 50000, step=5000, 
+                                               help="Spending specifically during Barista years. Often lower than full retirement.")
+        barista_until_age = st.number_input("Work Part-Time Until Age", min_value=current_age+1, max_value=100, 
+                                            value=max(60, retirement_age))
     # 3. Assets & Housing (Reordered Third)
     with st.sidebar.expander("3. Assets & Housing", expanded=False):
         start_balance_input = st.number_input("Invested Assets ($)", 0, 10000000, 100000, step=5000)
@@ -1463,4 +1476,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
