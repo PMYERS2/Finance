@@ -1422,7 +1422,7 @@ with tab2:
             hide_index=True
         )
         
-with tab4:
+    with tab4:
         st.markdown(f"**Audit Table: {scenario_label}**")
         
         # Define formatters for the new lumpy columns
@@ -1461,6 +1461,7 @@ with tab4:
 
 if __name__ == "__main__":
     main()
+
 
 
 
