@@ -534,9 +534,8 @@ def main():
         2.  **Select a Scenario:** Use the **Visualize Scenario** dropdown (on the right side of the chart) to see how early retirement or Part-Time work FIRE changes your net worth.
         3.  **Analyze the Data:** Use the **Audit Table** tab at the bottom for a year-by-year "receipt" of how every dollar is calculated.
 
-        ### **Choosing part-time work numbers Effectively**
+        ### **Choosing Barista FIRE Effectively**
         Transitioning to part-time work ("Barista FIRE") requires careful expense planning:
-        * **Extra Costs:** If other costs like Kids and Car are set then part-time spend is added on top of these expenses.
         * **The Health Care Gap:** When leaving full-time work, your employer likely stops subsidizing your health insurance. You must account for higher premiums and out-of-pocket costs.
         * **Setting the Spend:** In Sidebar Section 2, use the **'Part-Time Annual Spend'** field to reflect these increased costs. It should likely be **higher** than your current expenses to account for these lost employer subsidies.
 
@@ -1259,10 +1258,14 @@ def main():
         fig_cone.update_layout(height=300, margin=dict(t=20, b=20, l=20, r=20), hovermode="x unified", yaxis=dict(tickformat=",.0f"))
         st.plotly_chart(fig_cone, use_container_width=True)
 
-with tab2:
+    with tab2:
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Income vs Expenses (Scenario)**")
+            
+            # --- CUSTOM LOGIC FOR GRAPH INCOME & EXPENSES ---
+            # We reconstruct the lines based on the SCENARIO (Work vs Barista vs Early),
+            # ensuring Barista income is treated as Pre-Tax.
             
             base_expenses_plot = []
             graph_gross_income = []
@@ -1270,32 +1273,41 @@ with tab2:
             
             for i, row in df_chart.iterrows():
                 age = row["Age"]
-                idx = int(row["Year"] - 1) 
+                idx = int(row["Year"] - 1) # 0-based index
+                
+                # Inflation factor for manual adjustments if needed (Nominal conversion)
                 infl_factor_nominal = (1 + infl_rate) ** idx
                 
-                # --- 1. INCOME LOGIC (Fixed for Inflation) ---
+                # --- 1. INCOME LOGIC ---
                 if age < stop_age:
+                    # WORKING PHASE
                     if idx < len(df_income):
-                        graph_gross_income.append(df_income.loc[idx, "IncomeRealBeforeTax"])
-                        graph_net_income.append(df_income.loc[idx, "IncomeRealAfterTax"])
+                        # df_income cols are already adjusted for show_real/nominal preference
+                        g_val = df_income.loc[idx, "IncomeRealBeforeTax"]
+                        n_val = df_income.loc[idx, "IncomeRealAfterTax"]
+                        graph_gross_income.append(g_val)
+                        graph_net_income.append(n_val)
                     else:
                         graph_gross_income.append(0.0)
                         graph_net_income.append(0.0)
                         
                 elif is_barista and age < barista_until_age:
-                    # Treat part-time goal as Real (Today's $) and scale up if Nominal
+                    # BARISTA PHASE
+                    # User input 'barista_income_today' is treated as PRE-TAX Real (Today's $)
+                    
                     gross_real = barista_income_today
                     tax_real = total_tax_on_earned(gross_real, state_tax_rate)
                     net_real = max(0, gross_real - tax_real)
                     
-                    if show_real:
+                    if show_real and infl_rate > 0:
                         graph_gross_income.append(gross_real)
                         graph_net_income.append(net_real)
                     else:
-                        # APPLY INFLATION to Part-Time income here
                         graph_gross_income.append(gross_real * infl_factor_nominal)
                         graph_net_income.append(net_real * infl_factor_nominal)
+                        
                 else:
+                    # FULL RETIREMENT PHASE
                     graph_gross_income.append(0.0)
                     graph_net_income.append(0.0)
 
@@ -1422,10 +1434,25 @@ with tab2:
             hide_index=True
         )
         
-with tab4:
+    with tab4:
         st.markdown(f"**Audit Table: {scenario_label}**")
+        st.caption("Detailed view of Start Balance to End Balance flow.")
+
+        st.markdown("""
+        #### 🧮 Flow Logic
         
-        # Define formatters for the new lumpy columns
+        $$
+        \\text{EndBalance} = \\text{StartBalance} + \\text{Growth} + \\text{AnnualSavings} - \\text{Withdrawals}
+        $$
+        
+        Note: The **StartBalance** of the next row (Age + 1) equals the **EndBalance** of the current row.
+        """)
+        
+        # Add Total Spending Column (Portfolio Draws + Active Income Used)
+        # This reflects the total lifestyle cost (Spending).
+        # Note: We use the pre-calculated detailed_total_spending to ensure it matches
+        # consumption rather than just Income + Withdrawal.
+
         format_dict_d = {
             "StartBalance": "${:,.0f}",
             "EndBalance": "${:,.0f}",
@@ -1434,8 +1461,6 @@ with tab4:
             "KidCost": "${:,.0f}",
             "CarCost": "${:,.0f}",
             "HomeCost": "${:,.0f}",
-            "OtherCost1": "${:,.0f}",  # New column
-            "OtherCost2": "${:,.0f}",  # New column
             "TotalPortfolioDraw": "${:,.0f}",
             "ScenarioActiveIncome": "${:,.0f}",
             "InvestGrowthYear": "${:,.0f}",
@@ -1445,12 +1470,22 @@ with tab4:
             "Age": "{:.0f}"
         }
         
-        # Add the new lumpy costs to the column list
+        # UPDATED COLUMN ORDERING AS REQUESTED
         cols = [
-            "Age", "StartBalance", "AnnualRate", "InvestGrowthYear", 
-            "ContribYear", "EndBalance", "TotalSpending", "LivingWithdrawal", 
-            "TaxPenalty", "KidCost", "CarCost", "HomeCost", 
-            "OtherCost1", "OtherCost2", "ScenarioActiveIncome"
+            "Age", 
+            "StartBalance",
+            "AnnualRate",
+            "InvestGrowthYear",
+            "ContribYear", 
+            # "TotalPortfolioDraw", # Removed to reduce clutter in favor of itemized list
+            "EndBalance",
+            "TotalSpending",
+            "LivingWithdrawal", 
+            "TaxPenalty", 
+            "KidCost", 
+            "CarCost", 
+            "HomeCost",
+            "ScenarioActiveIncome"
         ]
         
         st.dataframe(
@@ -1461,8 +1496,6 @@ with tab4:
 
 if __name__ == "__main__":
     main()
-
-
 
 
 
