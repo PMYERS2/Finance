@@ -220,25 +220,25 @@ def compute_regular_fi_age(
     # or just the standard target. Let's return the standard 4% target for display fallback.
     return None, fi_annual_spend_today / base_swr
 
-def compute_barista_fi_age(
-    df_full, current_age, start_balance_input, fi_annual_spend_today, barista_income_today, barista_spend_today,
-    infl_rate, base_swr, barista_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly_compounding
+def compute_part_time_fi_age(
+    df_full, current_age, start_balance_input, fi_annual_spend_today, pt_income_today, pt_spend_today,
+    infl_rate, base_swr, pt_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly_compounding
 ):
-    # Updated Barista FIRE Definition:
-    # 1. Start Barista Job at Age X.
-    # 2. Withdraw (BaristaSpend - BaristaIncome) annually from Age X to 'barista_until_age'.
-    # 3. CRITICAL: At 'barista_until_age', the remaining balance MUST equal the Full FI Number 
+    # Updated Part-Time Work Definition:
+    # 1. Start Part-Time Job at Age X.
+    # 2. Withdraw (PT_Spend - PT_Income) annually from Age X to 'pt_until_age'.
+    # 3. CRITICAL: At 'pt_until_age', the remaining balance MUST equal the Full FI Number 
     #    (FullExpenses / SWR_at_that_age).
     
-    # Calculate GAP based on Barista Spend, not Full Retirement Spend
-    gap = max(0, barista_spend_today - barista_income_today)
+    # Calculate GAP based on Part-Time Spend, not Full Retirement Spend
+    gap = max(0, pt_spend_today - pt_income_today)
     
     if base_swr <= 0 or df_full is None:
         return None, None
 
-    # Calculate the Target we need to hit at the END of the Barista Phase (e.g. at 60)
+    # Calculate the Target we need to hit at the END of the Part-Time Phase (e.g. at 60)
     # This target is based on FULL RETIREMENT SPENDING
-    final_swr = get_dynamic_swr(barista_until_age, base_swr)
+    final_swr = get_dynamic_swr(pt_until_age, base_swr)
     target_real_at_finish = fi_annual_spend_today / final_swr
     
     # Map start balances
@@ -247,21 +247,21 @@ def compute_barista_fi_age(
     
     # We iterate through candidate start ages
     # Checking current_age is allowed (immediate transition)
-    for age in range(current_age, barista_until_age + 1):
+    for age in range(current_age, pt_until_age + 1):
         if age not in balance_map: continue
         
         start_bal = balance_map[age]
         
         # Determine the target in Nominal terms at the finish line
-        years_total_horizon = barista_until_age - current_age
+        years_total_horizon = pt_until_age - current_age
         target_nominal_finish = target_real_at_finish * ((1 + infl_rate) ** years_total_horizon)
         
-        # Simulate the bridge period (Barista phase)
-        # We withdraw ONLY the gap. Contributions are 0 (assuming Barista covers living + gap draw)
+        # Simulate the bridge period (Part-Time phase)
+        # We withdraw ONLY the gap. Contributions are 0 (assuming Part-Time covers living + gap draw)
         final_bal = simulate_period_exact(
             start_balance_nominal=start_bal,
             start_age=age,
-            end_age=barista_until_age,
+            end_age=pt_until_age,
             current_age=current_age,
             annual_rates_full=annual_rates_by_year_full,
             annual_expense_real=gap, # Withdrawal is just the gap (Spend - Income)
@@ -530,7 +530,7 @@ def main():
             **How to use this dashboard:**
             1. **Set Inputs:** Use the sidebar to enter your current income, expenses, and invested assets.
             2. **Adjust Goals:** Define your retirement age and desired spending levels.
-            3. **Select Scenario:** Use the "Select Scenario" dropdown to visualize traditional work, Barista FIRE, or a custom early retirement age.
+            3. **Select Scenario:** Use the "Select Scenario" dropdown to visualize traditional work, Part-Time Work, or a custom early retirement age.
             4. **Review:** Look at the 'Future Income' card to see what your portfolio can safely provide at your chosen exit age.
 
             *Note: This calculator focuses strictly on portfolio withdrawals and does **not** account for Social Security benefits.*
@@ -575,10 +575,9 @@ def main():
         retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
         
         fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
-        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
-        # ADDED NEW INPUT HERE
-        barista_spend_today = st.number_input("Barista Annual Spend ($)", 0, 500000, 50000, step=5000, help="Spending specifically during Barista years. Often lower than full retirement.")
-        barista_until_age = st.number_input("Work Barista Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
+        pt_income_today = st.number_input("Part-Time Income Goal ($)", 0, 200000, 30000, step=5000)
+        pt_spend_today = st.number_input("Part-Time Annual Spend ($)", 0, 500000, 50000, step=5000, help="Spending specifically during part-time work years. Often lower than full retirement.")
+        pt_until_age = st.number_input("Work Part-Time Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
 
     # 3. Assets & Housing (Reordered Third)
     with st.sidebar.expander("3. Assets & Housing", expanded=True):
@@ -804,9 +803,6 @@ def main():
         use_yearly_compounding=use_yearly
     )
     df_full["Age"] = current_age + df_full["Year"] - 1
-    # KEY CHANGE: "Balance" in our visuals will now map to "StartBalance"
-    # This aligns the chart with "Start of Year" expectations.
-    # We keep 'EndBalance' for logic that might need it.
     
     # --- KPI CALCS (Calculated HERE, before Dashboard Controls) ---
     coast_age, _, _, _ = compute_coast_fi_age(
@@ -817,14 +813,13 @@ def main():
         df_full, current_age, start_balance_effective, fi_annual_spend_today, 
         infl_rate, base_swr_30yr
     )
-    barista_age, _ = compute_barista_fi_age(
-        df_full, current_age, start_balance_effective, fi_annual_spend_today, barista_income_today, barista_spend_today, 
-        infl_rate, base_swr_30yr, barista_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly
+    pt_age, _ = compute_part_time_fi_age(
+        df_full, current_age, start_balance_effective, fi_annual_spend_today, pt_income_today, pt_spend_today, 
+        infl_rate, base_swr_30yr, pt_until_age, annual_rates_by_year_full, early_withdrawal_tax_rate, use_yearly
     )
 
     # --- DASHBOARD VISUALIZATION CONTROLS ---
     
-    # Use st.markdown to create a small vertical spacer instead of "---" if needed
     st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
     
     viz_col, control_col = st.columns([3, 1])
@@ -833,44 +828,34 @@ def main():
     with control_col:
         st.markdown("**Visualize Scenario**")
         
-        use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
+        use_pt_mode = st.checkbox("Simulate Part-Time Work?", False, help="If checked, custom early retirement assumes part-time income.")
         
-        # Custom Early Retirement Slider
-        # Now fi_age_regular is defined!
         default_exit = fi_age_regular if fi_age_regular else 55
         custom_exit_age = st.slider("Custom Early Ret. Age", min_value=current_age+1, max_value=retirement_age, value=default_exit)
         
         # Scenario Selector
-        # Define the available keys (internal IDs) and their display labels
         scenario_options = ["Work"]
         display_map = {"Work": "Work until Full Retirement"}
         
-        # Only add Barista if valid
-        if barista_age:
-            scenario_options.append("Barista")
-            display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
+        if pt_age:
+            scenario_options.append("Part-Time")
+            display_map["Part-Time"] = f"Part-Time Work (Age {pt_age})"
             
         scenario_options.append("Custom")
         display_map["Custom"] = f"Custom (Age {custom_exit_age})"
         
         # --- ROBUST STATE MANAGEMENT ---
-        # 1. Get current state, default to "Work"
         current_selection = st.session_state.get("scenario_selector", "Work")
         
-        # 2. Check if current state is valid in the NEW options list
         if current_selection not in scenario_options:
-            # If invalid (e.g. Barista no longer possible), fall back to Work
             current_selection = "Work"
-            # Force update session state immediately so the widget renders correctly
             st.session_state.scenario_selector = current_selection
             
-        # 3. Determine the index for the widget
         try:
             default_ix = scenario_options.index(current_selection)
         except ValueError:
             default_ix = 0
         
-        # 4. Render widget
         selected_key = st.selectbox(
             "Select Scenario:", 
             options=scenario_options, 
@@ -879,22 +864,22 @@ def main():
             key="scenario_selector"
         )
 
-    # --- DETERMINE SCENARIO LOGIC (Moved up for Chart & KPI) ---
+    # --- DETERMINE SCENARIO LOGIC ---
     stop_age = retirement_age # Default
-    is_coast, is_barista, is_early = False, False, False
+    is_coast, is_pt, is_early = False, False, False
     scenario_label = display_map[selected_key]
     
-    if selected_key == "Barista":
-        stop_age = barista_age
-        is_barista = True
+    if selected_key == "Part-Time":
+        stop_age = pt_age
+        is_pt = True
     elif selected_key == "Custom":
         stop_age = custom_exit_age
-        if use_barista_mode:
-            is_barista = True
+        if use_pt_mode:
+            is_pt = True
         else:
             is_early = True
 
-    # --- BUILD CHART DATA (Now available for KPIs) ---
+    # --- BUILD CHART DATA ---
     monthly_contrib_chart = []
     annual_expense_chart = list(annual_expense_by_year_nominal_full) 
     
@@ -925,14 +910,13 @@ def main():
         
         # 2. Retirement Phase Expenses
         if age >= stop_age:
-            if is_barista:
-                 if age < barista_until_age:
-                     # BARISTA PHASE
-                     active_income_this_year = barista_income_today
-                     # Use Barista specific spend
-                     base_need = max(0, barista_spend_today - barista_income_today) * ((1+infl_rate)**(y+1))
+            if is_pt:
+                 if age < pt_until_age:
+                     # PART-TIME PHASE
+                     active_income_this_year = pt_income_today
+                     base_need = max(0, pt_spend_today - pt_income_today) * ((1+infl_rate)**(y+1))
                  else:
-                     # FULL RETIREMENT PHASE (After Barista)
+                     # FULL RETIREMENT PHASE (After Part-Time)
                      base_need = fi_annual_spend_today * ((1+infl_rate)**(y+1))
                      active_income_this_year = 0.0
             elif is_early:
@@ -983,25 +967,18 @@ def main():
         det_cars.append(exp_cars_nominal[y])
         det_housing.append(exp_housing_nominal[y])
         
-        # --- TOTAL SPENDING CALCULATION (Independent of Income Source) ---
-        # Calculate nominal base spending first
+        # --- TOTAL SPENDING CALCULATION ---
         base_spending_nom = 0.0
-        
-        # Inflation factor for manual calc
         inf_f = (1 + infl_rate) ** y
         
         if age < stop_age:
-             # Accumulation Phase: Use Current Expenses + Growth
              base_spending_nom = expense_today * ((1 + expense_growth_rate) ** y) * inf_f
-        elif is_barista and age < barista_until_age:
-             # Barista Phase
-             base_spending_nom = barista_spend_today * inf_f
+        elif is_pt and age < pt_until_age:
+             # Part-Time Phase
+             base_spending_nom = pt_spend_today * inf_f
         else:
-             # Retirement Phase
              base_spending_nom = fi_annual_spend_today * inf_f
              
-        # Add Lumpy Expenses (Already nominal) + Tax Penalty
-        # Note: TaxPenalty is calculated above in retirement logic (0 otherwise)
         lumpy_total = exp_kids_nominal[y] + exp_cars_nominal[y] + exp_housing_nominal[y] + (det_tax_penalty[-1] if det_tax_penalty else 0.0)
         
         detailed_total_spending.append(base_spending_nom + lumpy_total)
@@ -1029,7 +1006,6 @@ def main():
 
     # Real Adjustment
     if show_real and infl_rate > 0:
-        # For Start of Year adjustments, we deflate by (1+inf)^year_idx
         df_chart["DF"] = (1+infl_rate)**(df_chart["Year"] - 1)
         for c in ["Balance", "HomeEquity", "NetWorth", "AnnualExpense", "StartBalance", "EndBalance"]:
             df_chart[c] /= df_chart["DF"]
@@ -1037,31 +1013,23 @@ def main():
             df_chart[c] /= df_chart["DF"]
 
     # --- DYNAMIC FUTURE INCOME KPI ---
-    
-    # 1. Determine "Full Retirement Start Age" for the selected scenario
     full_ret_start_age = retirement_age # Default Work
-    if is_barista:
-        full_ret_start_age = barista_until_age
+    if is_pt:
+        full_ret_start_age = pt_until_age
     elif is_early:
         full_ret_start_age = stop_age
     
-    # 2. Get Balance at that age from df_chart
-    # We look for the row where Age == full_ret_start_age
     row_at_ret = df_chart[df_chart["Age"] == full_ret_start_age]
-    
     future_income_val = 0.0
-    future_swr_used = 0.0
     
     if not row_at_ret.empty:
-        final_balance = row_at_ret.iloc[0]["Balance"] # Already Real/Nominal adjusted by loop above
+        final_balance = row_at_ret.iloc[0]["Balance"]
         future_swr_used = get_dynamic_swr(full_ret_start_age, base_swr_30yr)
         future_income_val = final_balance * future_swr_used
         
-    # --- TOP ROW: THE VERDICT (Redesigned for Single Screen) ---
-    
+    # --- TOP ROW: THE VERDICT ---
     def render_card(col, title, value, desc, sub_value=None):
         sub_html = f"<div style='font-size:12px; font-weight:600; color:#2E7D32; margin-top:2px;'>{sub_value}</div>" if sub_value else ""
-        
         html_content = (
             f'<div class="kpi-card">'
             f'<div class="kpi-title">{title}</div>'
@@ -1070,49 +1038,31 @@ def main():
             f'<div class="kpi-subtitle">{textwrap.shorten(desc, width=60, placeholder="...")}</div>'
             f'</div>'
         )
-        
         with col:
             st.markdown(html_content, unsafe_allow_html=True)
 
     with kpi_container:
-        # Layout: 3 Equal Columns
         c1, c2, c3 = st.columns(3)
         
         # 1. Regular FIRE
         val_reg = str(fi_age_regular) if fi_age_regular else "N/A"
         color_reg = "#0D47A1" if fi_age_regular else "#CC0000"
-        if fi_age_regular:
-            swr_r = get_dynamic_swr(fi_age_regular, base_swr_30yr)
-            desc_reg = f"Based on {swr_r*100:.2f}% SWR."
-        else:
-            desc_reg = "Target not reached."
-        render_card(c1, "Regular FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", desc_reg)
+        desc_reg = f"Based on {get_dynamic_swr(fi_age_regular if fi_age_regular else 60, base_swr_30yr)*100:.2f}% SWR." if fi_age_regular else "Target not reached."
+        render_card(c1, "Full FIRE Age", f"<span style='color:{color_reg}'>{val_reg}</span>", desc_reg)
 
-        # 2. Barista FIRE
-        val_bar = str(barista_age) if barista_age else "N/A"
-        color_bar = "#0D47A1" if barista_age else "#CC0000"
-        if barista_age:
-            row_b = df_full[df_full["Age"] == barista_age]
-            if not row_b.empty:
-                # Calculate Nominal Gap
-                gap_real = max(0, barista_spend_today - barista_income_today)
-                y_idx = barista_age - current_age
-                gap_nom = gap_real * ((1 + infl_rate) ** y_idx)
-                
-                # Nominal Balance at start of that year
-                bal_nom = row_b.iloc[0]["StartBalance"]
-                
-                eff_swr = (gap_nom / bal_nom) if bal_nom > 0 else 0.0
-                desc_bar = f"Gap SWR: {eff_swr*100:.2f}%. Work until {barista_until_age}."
-            else:
-                desc_bar = f"Work until {barista_until_age}."
+        # 2. Part-Time Work Age
+        val_pt = str(pt_age) if pt_age else "N/A"
+        color_pt = "#0D47A1" if pt_age else "#CC0000"
+        if pt_age:
+            gap_real = max(0, pt_spend_today - pt_income_today)
+            desc_pt = f"Work Part-Time until {pt_until_age}. Needs ${gap_real:,.0f} net draw."
         else:
-            desc_bar = "N/A"
-        render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", desc_bar)
+            desc_pt = "Target not reached."
+        render_card(c2, "Part-Time Work Age", f"<span style='color:{color_pt}'>{val_pt}</span>", desc_pt)
         
-        # 3. Future Income (Dynamic)
+        # 3. Future Income
         scen_name = "Work"
-        if is_barista: scen_name = "Barista"
+        if is_pt: scen_name = "Part-Time"
         elif is_early: scen_name = "Custom"
         
         render_card(
@@ -1125,84 +1075,27 @@ def main():
 
     # 5. Plot (In Left Column)
     with viz_col:
-        # We plot a bit past the "Full Retirement Start" to show the safe phase
-        # User requested: "until retirement age always"
-        # We ensure it shows at least up to retirement_age, or the scenario end if later.
         plot_end = max(retirement_age, full_ret_start_age)
         if plot_end > max_sim_age: plot_end = max_sim_age
-        
         df_p = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
         
         fig = go.Figure()
-        # Main Balance
-        fig.add_trace(go.Bar(
-            x=df_p["Age"], y=df_p["Balance"], 
-            name="Invested Assets (Start of Year)",
-            marker_color='rgba(58, 110, 165, 0.8)', # Strong Blue
-            hovertemplate="$%{y:,.0f}"
-        ))
-        # Home Equity
-        fig.add_trace(go.Bar(
-            x=df_p["Age"], y=df_p["HomeEquity"], 
-            name="Home Equity (Start of Year)",
-            marker_color='rgba(167, 173, 178, 0.5)', # Grey
-            hovertemplate="$%{y:,.0f}"
-        ))
-        
-        milestone = df_p[df_p["NetWorth"] >= 1000000]
-        if not milestone.empty:
-            m_row = milestone.iloc[0]
-            fig.add_trace(go.Scatter(
-                x=[m_row["Age"]],
-                y=[m_row["NetWorth"]],
-                mode="markers+text",
-                name="Hit $1M",
-                text=["Hit $1M!"],
-                textposition="top center",
-                marker=dict(color="#D32F2F", size=15, symbol="circle"),
-                showlegend=False
-            ))
-        
-        if not df_p.empty:
-            final_row = df_p.iloc[-1]
-            fig.add_annotation(
-                x=final_row["Age"],
-                y=final_row["NetWorth"],
-                text=f"<b>${final_row['NetWorth']:,.0f}</b>",
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=1,
-                arrowwidth=2,
-                ax=0,
-                ay=-40,
-                font=dict(size=16, color="black"),
-                bgcolor="rgba(255,255,255,0.8)",
-                bordercolor="black",
-                borderwidth=1
-            )
-        
-        target_val = fi_target_bal
-        if show_real and infl_rate > 0: target_val = fi_annual_spend_today / base_swr_30yr
+        fig.add_trace(go.Bar(x=df_p["Age"], y=df_p["Balance"], name="Invested Assets", marker_color='rgba(58, 110, 165, 0.8)', hovertemplate="$%{y:,.0f}"))
+        fig.add_trace(go.Bar(x=df_p["Age"], y=df_p["HomeEquity"], name="Home Equity", marker_color='rgba(167, 173, 178, 0.5)', hovertemplate="$%{y:,.0f}"))
         
         fig.update_layout(
-            # UPDATED TITLE SIZE AND BOLDNESS
             title=dict(text="<b>Net Worth Projection (Start of Year)</b>", font=dict(size=20)),
-            xaxis_title="Age (Start of Year)", yaxis_title="Value ($)",
-            barmode='stack',
-            hovermode="x unified",
-            legend=dict(orientation="h", y=1.02, x=0.01),
-            margin=dict(l=20, r=20, t=40, b=20),
-            height=380, # Slightly smaller height to ensure fit
-            yaxis=dict(tickformat=",.0f")
+            xaxis_title="Age", yaxis_title="Value ($)",
+            barmode='stack', hovermode="x unified", legend=dict(orientation="h", y=1.02, x=0.01),
+            margin=dict(l=20, r=20, t=40, b=20), height=380, yaxis=dict(tickformat=",.0f")
         )
-        
         st.plotly_chart(fig, use_container_width=True)
         
     with control_col:
         st.info(f"Viewing: **{scenario_label}**")
-        if is_barista:
-            st.caption(f"Barista Phase: Age {stop_age} to {barista_until_age}")
-            st.caption(f"Full Retire: Age {barista_until_age}+")
+        if is_pt:
+            st.caption(f"Part-Time Phase: Age {stop_age} to {pt_until_age}")
+            st.caption(f"Full Retire: Age {pt_until_age}+")
         elif is_early:
             st.caption(f"Early Retire: Age {stop_age}+")
         else:
@@ -1222,255 +1115,65 @@ def main():
         for df_ in [df_bear, df_bull]:
             df_["Age"] = current_age + df_["Year"] - 1
             df_["NW"] = df_["StartBalance"] + home_equity_by_year_full
-            if show_real and infl_rate > 0:
-                df_["NW"] /= ((1+infl_rate)**(df_["Year"]-1))
-        
-        df_bear_p = df_bear[df_bear["Age"] <= plot_end]
-        df_bull_p = df_bull[df_bull["Age"] <= plot_end]
+            if show_real and infl_rate > 0: df_["NW"] /= ((1+infl_rate)**(df_["Year"]-1))
         
         fig_cone = go.Figure()
-        fig_cone.add_trace(go.Scatter(x=df_bull_p["Age"], y=df_bull_p["NW"], mode='lines', line=dict(width=0), name="Bull (+1%)", showlegend=False, hovertemplate="$%{y:,.0f}"))
-        fig_cone.add_trace(go.Scatter(x=df_bear_p["Age"], y=df_bear_p["NW"], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(200,200,200,0.3)', name="Range", hovertemplate="$%{y:,.0f}"))
-        fig_cone.add_trace(go.Scatter(x=df_p["Age"], y=df_p["NetWorth"], mode='lines', line=dict(color='#3A6EA5', width=2), name="Base Case", hovertemplate="$%{y:,.0f}"))
+        fig_cone.add_trace(go.Scatter(x=df_bull[df_bull["Age"]<=plot_end]["Age"], y=df_bull[df_bull["Age"]<=plot_end]["NW"], mode='lines', line=dict(width=0), showlegend=False))
+        fig_cone.add_trace(go.Scatter(x=df_bear[df_bear["Age"]<=plot_end]["Age"], y=df_bear[df_bear["Age"]<=plot_end]["NW"], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(200,200,200,0.3)', name="Range"))
+        fig_cone.add_trace(go.Scatter(x=df_p["Age"], y=df_p["NetWorth"], mode='lines', line=dict(color='#3A6EA5', width=2), name="Base Case"))
         
-        fig_cone.update_layout(height=300, margin=dict(t=20, b=20, l=20, r=20), hovermode="x unified", yaxis=dict(tickformat=",.0f"))
+        fig_cone.update_layout(height=300, margin=dict(t=20, b=20, l=20, r=20), yaxis=dict(tickformat=",.0f"))
         st.plotly_chart(fig_cone, use_container_width=True)
 
     with tab2:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Income vs Expenses (Scenario)**")
-            
-            # --- CUSTOM LOGIC FOR GRAPH INCOME & EXPENSES ---
-            # We reconstruct the lines based on the SCENARIO (Work vs Barista vs Early),
-            # ensuring Barista income is treated as Pre-Tax.
-            
-            base_expenses_plot = []
-            graph_gross_income = []
-            graph_net_income = []
-            
-            for i, row in df_chart.iterrows():
-                age = row["Age"]
-                idx = int(row["Year"] - 1) # 0-based index
-                
-                # Inflation factor for manual adjustments if needed (Nominal conversion)
-                infl_factor_nominal = (1 + infl_rate) ** idx
-                
-                # --- 1. INCOME LOGIC ---
-                if age < stop_age:
-                    # WORKING PHASE
-                    if idx < len(df_income):
-                        # df_income cols are already adjusted for show_real/nominal preference
-                        g_val = df_income.loc[idx, "IncomeRealBeforeTax"]
-                        n_val = df_income.loc[idx, "IncomeRealAfterTax"]
-                        graph_gross_income.append(g_val)
-                        graph_net_income.append(n_val)
-                    else:
-                        graph_gross_income.append(0.0)
-                        graph_net_income.append(0.0)
-                        
-                elif is_barista and age < barista_until_age:
-                    # BARISTA PHASE
-                    # User input 'barista_income_today' is treated as PRE-TAX Real (Today's $)
-                    
-                    gross_real = barista_income_today
-                    tax_real = total_tax_on_earned(gross_real, state_tax_rate)
-                    net_real = max(0, gross_real - tax_real)
-                    
-                    if show_real and infl_rate > 0:
-                        graph_gross_income.append(gross_real)
-                        graph_net_income.append(net_real)
-                    else:
-                        graph_gross_income.append(gross_real * infl_factor_nominal)
-                        graph_net_income.append(net_real * infl_factor_nominal)
-                        
-                else:
-                    # FULL RETIREMENT PHASE
-                    graph_gross_income.append(0.0)
-                    graph_net_income.append(0.0)
-
-                # --- 2. EXPENSE LOGIC ---
-                if age < stop_age:
-                    # Working Phase: Expense grows from 'Current Expenses'
-                    val_nom = expense_today * ((1 + expense_growth_rate) ** idx) * infl_factor_nominal
-                    base_expenses_plot.append(val_nom)
-                elif is_barista and age < barista_until_age:
-                     # Barista Phase: Use specific barista spend
-                     val_nom = barista_spend_today * infl_factor_nominal
-                     base_expenses_plot.append(val_nom)
-                else:
-                    # Retirement/Barista Phase: Expense is 'Retirement Spend' Target
-                    val_nom = fi_annual_spend_today * infl_factor_nominal
-                    base_expenses_plot.append(val_nom)
-            
-            # --- PREPARE PLOTTING DATA ---
-            s_base_expenses = pd.Series(base_expenses_plot)
-            
-            # Adjust Expenses for Real/Nominal settings (using the DF column created in main)
-            if show_real and infl_rate > 0:
-                s_base_expenses /= df_chart["DF"]
-                
-            # Add Lumpy Expenses (Kid, Car, Home) to the Base
-            total_scenario_expenses = (
-                s_base_expenses + 
-                df_chart["KidCost"] + 
-                df_chart["CarCost"] + 
-                df_chart["HomeCost"] + 
-                df_chart["TaxPenalty"]
-            )
-            
-            # Slice to match the plotting range
-            df_p_graph = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
-            y_gross = graph_gross_income[:len(df_p_graph)]
-            y_net = graph_net_income[:len(df_p_graph)]
-            y_expenses = total_scenario_expenses[:len(df_p_graph)]
-            
-            fig_i = go.Figure()
-            
-            # Gross Income Line
-            fig_i.add_trace(go.Scatter(
-                x=df_p_graph["Age"], 
-                y=y_gross, 
-                name="Gross Income", 
-                line=dict(color="#B0BEC5", dash="dot", width=2), 
-                hovertemplate="$%{y:,.0f}"
-            ))
-            
-            # Net Income Line
-            fig_i.add_trace(go.Scatter(
-                x=df_p_graph["Age"], 
-                y=y_net, 
-                name="Net Income", 
-                line=dict(color="#66BB6A", width=3), 
-                hovertemplate="$%{y:,.0f}"
-            ))
-            
-            # Expense Line
-            fig_i.add_trace(go.Scatter(
-                x=df_p_graph["Age"], 
-                y=y_expenses, 
-                name="Total Spending", 
-                line=dict(color="#EF5350", width=3), 
-                hovertemplate="$%{y:,.0f}"
-            ))
-            
-            # Visual marker for Barista/Retirement transition
-            if stop_age < plot_end:
-                 fig_i.add_vline(x=stop_age, line_width=1, line_dash="dash", line_color="grey")
-
-            fig_i.update_layout(
-                height=300, 
-                margin=dict(t=30, b=20, l=20, r=20), 
-                yaxis=dict(tickformat=",.0f"),
-                legend=dict(orientation="h", y=1.1, x=0)
-            )
-            st.plotly_chart(fig_i, use_container_width=True)
-            
-        with c2:
-            st.markdown("**Investment Returns Glide Path**")
-            fig_r = go.Figure()
-            pcts = [r*100 for r in annual_rates_by_year_full]
-            fig_r.add_trace(go.Scatter(x=df_p["Age"], y=pcts[:len(df_p)], mode='lines', name="Return %", hovertemplate="%{y:.1f}%"))
-            fig_r.update_layout(height=250, margin=dict(t=20, b=20, l=20, r=20), yaxis_title="% Return", yaxis=dict(tickformat=".1f"))
-            st.plotly_chart(fig_r, use_container_width=True)
-
-        st.markdown("**Savings Rate (Accumulation Phase)**")
-        # Keep original savings rate chart but limit to working years to avoid confusion
-        df_savings_plot = df_income[df_income["Age"] < stop_age]
+        st.markdown("**Income vs Expenses (Scenario)**")
+        base_expenses_plot = []
+        graph_gross_income = []
+        graph_net_income = []
         
-        fig_s = go.Figure()
-        fig_s.add_trace(go.Scatter(
-            x=df_savings_plot["Age"], 
-            y=df_savings_plot["SavingsRate"] * 100, 
-            mode='lines', 
-            name="Savings Rate", 
-            line=dict(color="#42A5F5"),
-            hovertemplate="%{y:.1f}%"
-        ))
-        fig_s.update_layout(
-            height=250, 
-            margin=dict(t=20, b=20, l=20, r=20), 
-            yaxis_title="Savings Rate (%)",
-            yaxis=dict(tickformat=".1f")
-        )
-        st.plotly_chart(fig_s, use_container_width=True)
+        for i, row in df_chart.iterrows():
+            age, idx = row["Age"], int(row["Year"] - 1)
+            inf_nom = (1 + infl_rate) ** idx
+            
+            if age < stop_age:
+                if idx < len(df_income):
+                    graph_gross_income.append(df_income.loc[idx, "IncomeRealBeforeTax"])
+                    graph_net_income.append(df_income.loc[idx, "IncomeRealAfterTax"])
+                else:
+                    graph_gross_income.append(0.0); graph_net_income.append(0.0)
+            elif is_pt and age < pt_until_age:
+                gross_real = pt_income_today
+                net_real = max(0, gross_real - total_tax_on_earned(gross_real, state_tax_rate))
+                val = 1.0 if (show_real and infl_rate > 0) else inf_nom
+                graph_gross_income.append(gross_real * val); graph_net_income.append(net_real * val)
+            else:
+                graph_gross_income.append(0.0); graph_net_income.append(0.0)
+
+            if age < stop_age: val_nom = expense_today * ((1 + expense_growth_rate) ** idx) * inf_nom
+            elif is_pt and age < pt_until_age: val_nom = pt_spend_today * inf_nom
+            else: val_nom = fi_annual_spend_today * inf_nom
+            base_expenses_plot.append(val_nom)
+        
+        s_base_expenses = pd.Series(base_expenses_plot)
+        if show_real and infl_rate > 0: s_base_expenses /= df_chart["DF"]
+        y_expenses = s_base_expenses + df_chart["KidCost"] + df_chart["CarCost"] + df_chart["HomeCost"] + df_chart["TaxPenalty"]
+        
+        fig_i = go.Figure()
+        fig_i.add_trace(go.Scatter(x=df_p["Age"], y=graph_gross_income[:len(df_p)], name="Gross Income", line=dict(color="#B0BEC5", dash="dot")))
+        fig_i.add_trace(go.Scatter(x=df_p["Age"], y=graph_net_income[:len(df_p)], name="Net Income", line=dict(color="#66BB6A", width=3)))
+        fig_i.add_trace(go.Scatter(x=df_p["Age"], y=y_expenses[:len(df_p)], name="Total Spending", line=dict(color="#EF5350", width=3)))
+        
+        fig_i.update_layout(height=300, yaxis=dict(tickformat=",.0f"), legend=dict(orientation="h", y=1.1))
+        st.plotly_chart(fig_i, use_container_width=True)
 
     with tab3:
-        st.markdown("### Net Worth Summary (Start of Year)")
-        st.caption("Simplified overview of your projected wealth at the start of each age.")
-        
-        format_dict = {
-            "Balance": "${:,.0f}",
-            "HomeEquity": "${:,.0f}", 
-            "NetWorth": "${:,.0f}",
-            "AnnualExpense": "${:,.0f}",
-            "Age": "{:.0f}"
-        }
-        st.dataframe(
-            df_p[["Age", "Balance", "HomeEquity", "NetWorth"]].style.format(format_dict), 
-            use_container_width=True,
-            hide_index=True
-        )
+        st.markdown("### Net Worth Summary")
+        st.dataframe(df_p[["Age", "Balance", "HomeEquity", "NetWorth"]].style.format("${:,.0f}"), use_container_width=True, hide_index=True)
         
     with tab4:
         st.markdown(f"**Audit Table: {scenario_label}**")
-        st.caption("Detailed view of Start Balance to End Balance flow.")
-
-        st.markdown("""
-        #### 🧮 Flow Logic
-        
-        $$
-        \\text{EndBalance} = \\text{StartBalance} + \\text{Growth} + \\text{AnnualSavings} - \\text{Withdrawals}
-        $$
-        
-        Note: The **StartBalance** of the next row (Age + 1) equals the **EndBalance** of the current row.
-        """)
-        
-        # Add Total Spending Column (Portfolio Draws + Active Income Used)
-        # This reflects the total lifestyle cost (Spending).
-        # Note: We use the pre-calculated detailed_total_spending to ensure it matches
-        # consumption rather than just Income + Withdrawal.
-
-        format_dict_d = {
-            "StartBalance": "${:,.0f}",
-            "EndBalance": "${:,.0f}",
-            "LivingWithdrawal": "${:,.0f}",
-            "TaxPenalty": "${:,.0f}",
-            "KidCost": "${:,.0f}",
-            "CarCost": "${:,.0f}",
-            "HomeCost": "${:,.0f}",
-            "TotalPortfolioDraw": "${:,.0f}",
-            "ScenarioActiveIncome": "${:,.0f}",
-            "InvestGrowthYear": "${:,.0f}",
-            "ContribYear": "${:,.0f}",
-            "TotalSpending": "${:,.0f}",
-            "AnnualRate": "{:.2%}",
-            "Age": "{:.0f}"
-        }
-        
-        # UPDATED COLUMN ORDERING AS REQUESTED
-        cols = [
-            "Age", 
-            "StartBalance",
-            "AnnualRate",
-            "InvestGrowthYear",
-            "ContribYear", 
-            # "TotalPortfolioDraw", # Removed to reduce clutter in favor of itemized list
-            "EndBalance",
-            "TotalSpending",
-            "LivingWithdrawal", 
-            "TaxPenalty", 
-            "KidCost", 
-            "CarCost", 
-            "HomeCost",
-            "ScenarioActiveIncome"
-        ]
-        
-        st.dataframe(
-            df_p[cols].style.format(format_dict_d),
-            use_container_width=True,
-            hide_index=True
-        )
+        cols = ["Age", "StartBalance", "AnnualRate", "InvestGrowthYear", "ContribYear", "EndBalance", "TotalSpending", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "ScenarioActiveIncome"]
+        st.dataframe(df_p[cols].style.format({c: "${:,.0f}" for c in cols if c != "Age" and c != "AnnualRate"}).format({"AnnualRate": "{:.2%}"}), use_container_width=True, hide_index=True)
 
 if __name__ == "__main__":
     main()
