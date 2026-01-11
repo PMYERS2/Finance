@@ -1259,7 +1259,7 @@ def main():
         fig_cone.update_layout(height=300, margin=dict(t=20, b=20, l=20, r=20), hovermode="x unified", yaxis=dict(tickformat=",.0f"))
         st.plotly_chart(fig_cone, use_container_width=True)
 
-with tab2:
+    with tab2:
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Income vs Expenses (Scenario)**")
@@ -1461,6 +1461,7 @@ with tab2:
 
 if __name__ == "__main__":
     main()
+
 
 
 
