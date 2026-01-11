@@ -534,8 +534,9 @@ def main():
         2.  **Select a Scenario:** Use the **Visualize Scenario** dropdown (on the right side of the chart) to see how early retirement or Part-Time work FIRE changes your net worth.
         3.  **Analyze the Data:** Use the **Audit Table** tab at the bottom for a year-by-year "receipt" of how every dollar is calculated.
 
-        ### **Choosing Barista FIRE Effectively**
+        ### **Choosing part-time work numbers Effectively**
         Transitioning to part-time work ("Barista FIRE") requires careful expense planning:
+        * **Extra Costs:** If other costs like Kids and Car are set then part-time spend is added on top of these expenses.
         * **The Health Care Gap:** When leaving full-time work, your employer likely stops subsidizing your health insurance. You must account for higher premiums and out-of-pocket costs.
         * **Setting the Spend:** In Sidebar Section 2, use the **'Part-Time Annual Spend'** field to reflect these increased costs. It should likely be **higher** than your current expenses to account for these lost employer subsidies.
 
@@ -1496,6 +1497,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
