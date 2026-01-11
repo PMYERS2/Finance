@@ -526,7 +526,21 @@ def main():
         st.markdown("##### 🔮 FIRE & Retirement Forecaster")
     with c_head_2:
         show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
+# --- NEW HELP & DISCLAIMER SECTION ---
+    with st.expander("❓ How to use & Important Disclaimers", expanded=False):
+        st.markdown("""
+        ### **How to Use This Dashboard**
+        1.  **Configure the Sidebar:** Update your **Age**, **Income**, and **Expenses**. Expand the numbered sections in the sidebar to add lumpy costs like Kids, Cars, or Housing.
+        2.  **Select a Scenario:** Use the **Visualize Scenario** dropdown (on the right side of the chart) to see how early retirement or Barista FIRE changes your net worth.
+        3.  **Analyze the Data:** Use the **Audit Table** tab at the bottom for a year-by-year "receipt" of how every dollar is calculated.
 
+        ### **Key Assumptions & Disclaimers**
+        * **Social Security:** This dashboard **does not** take into account Social Security or private pensions. All income in retirement is assumed to come solely from your invested portfolio.
+        * **Inflation Handling:** * **Show Real Dollars (Checked):** Values are shown in today's purchasing power. If your "Future Income" says \$60k, it means you can buy exactly what \$60k buys today.
+            * **Show Real Dollars (Unchecked):** Values are "Nominal." You will see much larger numbers because it includes the literal price increases over time.
+        * **Glide Path:** Investment returns are not flat; they automatically decrease as you age to simulate a shift toward safer assets.
+        """)
+    # -------------------------------------
     # Container for Verdict Cards (We will populate this AFTER calculations)
     kpi_container = st.container()
     
@@ -1463,5 +1477,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
