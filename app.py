@@ -521,10 +521,21 @@ def main():
     """, unsafe_allow_html=True)
 
     # Description of purpose (Make it small)
-    c_head_1, c_head_2 = st.columns([3, 1])
+    c_head_1, c_head_2, c_head_3 = st.columns([3, 0.4, 1])
     with c_head_1:
         st.markdown("##### 🔮 FIRE & Retirement Forecaster")
     with c_head_2:
+        with st.popover("❓"):
+            st.markdown("""
+            **How to use this dashboard:**
+            1. **Set Inputs:** Use the sidebar to enter your current income, expenses, and invested assets.
+            2. **Adjust Goals:** Define your retirement age and desired spending levels.
+            3. **Select Scenario:** Use the "Select Scenario" dropdown to visualize traditional work, Barista FIRE, or a custom early retirement age.
+            4. **Review:** Look at the 'Future Income' card to see what your portfolio can safely provide at your chosen exit age.
+
+            *Note: This calculator focuses strictly on portfolio withdrawals and does **not** account for Social Security benefits.*
+            """)
+    with c_head_3:
         show_real = st.checkbox("Show Real Dollars", True, help="Adjust all values for inflation")
 
     # Container for Verdict Cards (We will populate this AFTER calculations)
@@ -624,7 +635,7 @@ def main():
         # Map style to the "Anchor Rate" (Return at age 45-55).
         style_map = {
             "Aggressive": 0.09,   # Renamed from "Aggressive (100% Stocks)"
-            "Balanced": 0.07,     # Renamed from "Balanced (60/40 Split)"
+            "Balanced": 0.07,      # Renamed from "Balanced (60/40 Split)"
             "Conservative": 0.05, # Renamed from "Conservative (Heavy Bonds)"
             "Custom": None
         }
