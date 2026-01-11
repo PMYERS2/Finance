@@ -564,10 +564,10 @@ def main():
         retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
         
         fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
-        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
+        barista_income_today = st.number_input("Part-Time Income Goal ($)", 0, 200000, 30000, step=5000)
         # ADDED NEW INPUT HERE
-        barista_spend_today = st.number_input("Barista Annual Spend ($)", 0, 500000, 50000, step=5000, help="Spending specifically during Barista years. Often lower than full retirement.")
-        barista_until_age = st.number_input("Work Barista Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
+        barista_spend_today = st.number_input("Part-Time Annual Spend ($)", 0, 500000, 50000, step=5000, help="Spending specifically during Barista years. Often lower than full retirement.")
+        barista_until_age = st.number_input("Work Part-Time Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
 
     # 3. Assets & Housing (Reordered Third)
     with st.sidebar.expander("3. Assets & Housing", expanded=False):
@@ -1463,3 +1463,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
