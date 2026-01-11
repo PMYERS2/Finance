@@ -691,7 +691,14 @@ def main():
             car_interval_years = c1.number_input("Replace Every (Yrs)", value=10)
         else:
             car_cost_today, first_car_age, car_interval_years = 0,0,0
-
+# --- NEW: OTHER LUMPY EXPENSES ---
+        st.markdown("**Other Lumpy Expenses**")
+        c1, c2 = st.columns(2)
+        other_expense_1_val = c1.number_input("Expense 1 ($)", value=0, step=1000, help="e.g., Wedding, Sabbatical, etc.")
+        other_expense_1_age = c2.number_input("at Age", value=current_age+5, key="oth1")
+        
+        other_expense_2_val = c1.number_input("Expense 2 ($)", value=0, step=1000)
+        other_expense_2_age = c2.number_input("at Age", value=current_age+10, key="oth2")
     # --- CALCULATION ENGINE (Running BEFORE Dashboard Controls) ---
     
     df_income = build_income_schedule(
@@ -749,7 +756,14 @@ def main():
             cost_nom = car_cost_today * ((1+infl_rate)**(y+1))
             annual_expense_by_year_nominal_full[y] += cost_nom
             exp_cars_nominal[y] += cost_nom
-
+# --- NEW: OTHER LUMPY EXPENSE LOGIC ---
+        if age == other_expense_1_age and other_expense_1_val > 0:
+            cost_nom = other_expense_1_val * ((1+infl_rate)**(y+1))
+            annual_expense_by_year_nominal_full[y] += cost_nom
+            
+        if age == other_expense_2_age and other_expense_2_val > 0:
+            cost_nom = other_expense_2_val * ((1+infl_rate)**(y+1))
+            annual_expense_by_year_nominal_full[y] += cost_nom
     # Home Logic Execution
     if include_home:
         # Re-calc Purchase logic for loop
@@ -1477,6 +1491,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
