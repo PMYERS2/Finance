@@ -536,7 +536,7 @@ def main():
     current_age = st.sidebar.number_input("Current Age", 20, 100, 30)
     
     # 1. Profile & Income (Reordered First)
-    with st.sidebar.expander("1. Income & Expenses", expanded=True):
+    with st.sidebar.expander("1. Income & Expenses", expanded=False):
         start_income = st.number_input("Pre-tax Income ($)", 0, 1000000, 100000, step=5000)
         expense_today = st.number_input("Current Expenses ($/yr)", 0, 500000, 40000, step=1000)
         state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
@@ -559,7 +559,7 @@ def main():
         if p2_pct != 0: promotions[p2_age] = p2_pct
 
     # 2. Future Goals (Reordered Second)
-    with st.sidebar.expander("2. Future Goals", expanded=True):
+    with st.sidebar.expander("2. Future Goals", expanded=False):
         ret_default = max(60, current_age + 1)
         retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
         
@@ -570,7 +570,7 @@ def main():
         barista_until_age = st.number_input("Work Barista Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
 
     # 3. Assets & Housing (Reordered Third)
-    with st.sidebar.expander("3. Assets & Housing", expanded=True):
+    with st.sidebar.expander("3. Assets & Housing", expanded=False):
         start_balance_input = st.number_input("Invested Assets ($)", 0, 10000000, 100000, step=5000)
         
         include_home = st.checkbox("Include Home Strategy", False) # Default OFF
@@ -1463,3 +1463,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
