@@ -1097,7 +1097,7 @@ def main():
                 desc_bar = f"Work until {barista_until_age}."
         else:
             desc_bar = "N/A"
-        render_card(c2, "Barista FIRE Age", f"<span style='color:{color_bar}'>{val_bar}</span>", desc_bar)
+        render_card(c2, "Part Time Income Age", f"<span style='color:{color_bar}'>{val_bar}</span>", desc_bar)
         
         # 3. Future Income (Dynamic)
         scen_name = "Work"
@@ -1463,4 +1463,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
