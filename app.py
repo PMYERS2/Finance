@@ -535,39 +535,31 @@ def main():
     # Global Settings (Age affects defaults)
     current_age = st.sidebar.number_input("Current Age", 20, 100, 30)
     
-    # 1. Profile & Income (Reordered First)
-    with st.sidebar.expander("1. Income & Expenses", expanded=False):
-        start_income = st.number_input("Pre-tax Income ($)", 0, 1000000, 100000, step=5000)
-        expense_today = st.number_input("Current Expenses ($/yr)", 0, 500000, 40000, step=1000)
-        state_tax_rate = st.number_input("State Tax Rate (%)", 0.0, 15.0, 0.0, 0.5) / 100.0
+   # 2. Future Goals
+with st.sidebar.expander("2. Future Goals", expanded=False):
+    ret_default = max(60, current_age + 1)
+    retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, 
+                                     help="The age you plan to stop working if you DON'T retire early.")
+    
+    fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
 
-        st.markdown("**Income Growth & Adjustments**")
-        st.caption("Use positive % for raises, negative % (e.g. -50) for pay cuts (e.g. partner quitting).")
-        income_growth_rate = st.number_input("Annual Income Growth (%)", 0.0, 20.0, 3.0, 0.5) / 100.0
-        promotions = {}
-        c1, c2 = st.columns(2)
-        with c1:
-            p1_default = max(35, current_age + 1)
-            p1_age = st.number_input("Event 1 Age", current_age+1, 90, p1_default)
-            
-            p2_default = max(40, current_age + 1)
-            p2_age = st.number_input("Event 2 Age", current_age+1, 90, p2_default)
-        with c2:
-            p1_pct = st.number_input("Event 1 % Change", -100.0, 500.0, 0.0, step=5.0) / 100.0
-            p2_pct = st.number_input("Event 2 % Change", -100.0, 500.0, 0.0, step=5.0) / 100.0
-        if p1_pct != 0: promotions[p1_age] = p1_pct
-        if p2_pct != 0: promotions[p2_age] = p2_pct
+    st.markdown("---") # Visual separator
+    
+    # Optional Part-Time Toggle
+    enable_barista = st.toggle("Plan for Part-Time Phase?", value=False, 
+                               help="Enable this if you want to model a transition period with lower income and spending.")
 
-    # 2. Future Goals (Reordered Second)
-    with st.sidebar.expander("2. Future Goals", expanded=False):
-        ret_default = max(60, current_age + 1)
-        retirement_age = st.number_input("Full Retirement Age", current_age+1, 90, ret_default, help="The age you plan to stop working if you DON'T retire early (Traditional path).")
-        
-        fi_annual_spend_today = st.number_input("Retirement Spend ($)", 0, 500000, 60000, step=5000)
-        barista_income_today = st.number_input("Barista Income Goal ($)", 0, 200000, 30000, step=5000)
-        # ADDED NEW INPUT HERE
-        barista_spend_today = st.number_input("Barista Annual Spend ($)", 0, 500000, 50000, step=5000, help="Spending specifically during Barista years. Often lower than full retirement.")
-        barista_until_age = st.number_input("Work Barista Until Age", min_value=current_age+1, max_value=100, value=max(60, retirement_age))
+    if enable_barista:
+        barista_income_today = st.number_input("Part-Time Income ($/yr)", 0, 200000, 30000, step=5000)
+        barista_spend_today = st.number_input("Part-Time Spend ($/yr)", 0, 500000, 50000, step=5000, 
+                                               help="Spending during the Barista years.")
+        barista_until_age = st.number_input("Work Part-Time Until Age", min_value=current_age+1, max_value=100, 
+                                            value=max(60, retirement_age))
+    else:
+        # Default values when the toggle is OFF so the rest of your math doesn't break
+        barista_income_today = 0
+        barista_spend_today = fi_annual_spend_today
+        barista_until_age = retirement_age
 
     # 3. Assets & Housing (Reordered Third)
     with st.sidebar.expander("3. Assets & Housing", expanded=False):
@@ -822,7 +814,7 @@ def main():
     with control_col:
         st.markdown("**Visualize Scenario**")
         
-        use_barista_mode = st.checkbox("Simulate Barista FIRE?", False, help="If checked, custom early retirement assumes Barista income.")
+        use_barista_mode = st.checkbox("Simulate Part Time Income Scenario?", False, help="If checked, custom early retirement assumes Barista income.")
         
         # Custom Early Retirement Slider
         # Now fi_age_regular is defined!
@@ -837,7 +829,7 @@ def main():
         # Only add Barista if valid
         if barista_age:
             scenario_options.append("Barista")
-            display_map["Barista"] = f"Barista FIRE (Age {barista_age})"
+            display_map["Barista"] = f"Part Time Income (Age {barista_age})"
             
         scenario_options.append("Custom")
         display_map["Custom"] = f"Custom (Age {custom_exit_age})"
@@ -1463,5 +1455,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
