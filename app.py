@@ -1232,7 +1232,6 @@ def main():
             st.caption(f"Work until: Age {retirement_age}")
 
     # --- TABS FOR DETAILS ---
-# --- TABS FOR DETAILS ---
     tab1, tab2, tab3, tab4 = st.tabs(["Risk Analysis", "Cash Flow Details", "Net Worth Table", "Audit Table"])
     
     with tab1:
@@ -1260,7 +1259,7 @@ def main():
         fig_cone.update_layout(height=300, margin=dict(t=20, b=20, l=20, r=20), hovermode="x unified", yaxis=dict(tickformat=",.0f"))
         st.plotly_chart(fig_cone, use_container_width=True)
 
-    with tab2:
+with tab2:
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Income vs Expenses (Scenario)**")
@@ -1284,6 +1283,7 @@ def main():
                         graph_net_income.append(0.0)
                         
                 elif is_barista and age < barista_until_age:
+                    # Treat part-time goal as Real (Today's $) and scale up if Nominal
                     gross_real = barista_income_today
                     tax_real = total_tax_on_earned(gross_real, state_tax_rate)
                     net_real = max(0, gross_real - tax_real)
@@ -1292,6 +1292,7 @@ def main():
                         graph_gross_income.append(gross_real)
                         graph_net_income.append(net_real)
                     else:
+                        # APPLY INFLATION to Part-Time income here
                         graph_gross_income.append(gross_real * infl_factor_nominal)
                         graph_net_income.append(net_real * infl_factor_nominal)
                 else:
@@ -1300,19 +1301,26 @@ def main():
 
                 # --- 2. EXPENSE LOGIC ---
                 if age < stop_age:
+                    # Working Phase: Expense grows from 'Current Expenses'
                     val_nom = expense_today * ((1 + expense_growth_rate) ** idx) * infl_factor_nominal
                     base_expenses_plot.append(val_nom)
                 elif is_barista and age < barista_until_age:
+                     # Barista Phase: Use specific barista spend
                      val_nom = barista_spend_today * infl_factor_nominal
                      base_expenses_plot.append(val_nom)
                 else:
+                    # Retirement/Barista Phase: Expense is 'Retirement Spend' Target
                     val_nom = fi_annual_spend_today * infl_factor_nominal
                     base_expenses_plot.append(val_nom)
             
+            # --- PREPARE PLOTTING DATA ---
             s_base_expenses = pd.Series(base_expenses_plot)
+            
+            # Adjust Expenses for Real/Nominal settings (using the DF column created in main)
             if show_real and infl_rate > 0:
                 s_base_expenses /= df_chart["DF"]
                 
+            # Add Lumpy Expenses (Kid, Car, Home) to the Base
             total_scenario_expenses = (
                 s_base_expenses + 
                 df_chart["KidCost"] + 
@@ -1321,20 +1329,51 @@ def main():
                 df_chart["TaxPenalty"]
             )
             
+            # Slice to match the plotting range
             df_p_graph = df_chart[df_chart["Age"] <= plot_end].reset_index(drop=True)
             y_gross = graph_gross_income[:len(df_p_graph)]
             y_net = graph_net_income[:len(df_p_graph)]
             y_expenses = total_scenario_expenses[:len(df_p_graph)]
             
             fig_i = go.Figure()
-            fig_i.add_trace(go.Scatter(x=df_p_graph["Age"], y=y_gross, name="Gross Income", line=dict(color="#B0BEC5", dash="dot", width=2), hovertemplate="$%{y:,.0f}"))
-            fig_i.add_trace(go.Scatter(x=df_p_graph["Age"], y=y_net, name="Net Income", line=dict(color="#66BB6A", width=3), hovertemplate="$%{y:,.0f}"))
-            fig_i.add_trace(go.Scatter(x=df_p_graph["Age"], y=y_expenses, name="Total Spending", line=dict(color="#EF5350", width=3), hovertemplate="$%{y:,.0f}"))
             
+            # Gross Income Line
+            fig_i.add_trace(go.Scatter(
+                x=df_p_graph["Age"], 
+                y=y_gross, 
+                name="Gross Income", 
+                line=dict(color="#B0BEC5", dash="dot", width=2), 
+                hovertemplate="$%{y:,.0f}"
+            ))
+            
+            # Net Income Line
+            fig_i.add_trace(go.Scatter(
+                x=df_p_graph["Age"], 
+                y=y_net, 
+                name="Net Income", 
+                line=dict(color="#66BB6A", width=3), 
+                hovertemplate="$%{y:,.0f}"
+            ))
+            
+            # Expense Line
+            fig_i.add_trace(go.Scatter(
+                x=df_p_graph["Age"], 
+                y=y_expenses, 
+                name="Total Spending", 
+                line=dict(color="#EF5350", width=3), 
+                hovertemplate="$%{y:,.0f}"
+            ))
+            
+            # Visual marker for Barista/Retirement transition
             if stop_age < plot_end:
                  fig_i.add_vline(x=stop_age, line_width=1, line_dash="dash", line_color="grey")
 
-            fig_i.update_layout(height=300, margin=dict(t=30, b=20, l=20, r=20), yaxis=dict(tickformat=",.0f"), legend=dict(orientation="h", y=1.1, x=0))
+            fig_i.update_layout(
+                height=300, 
+                margin=dict(t=30, b=20, l=20, r=20), 
+                yaxis=dict(tickformat=",.0f"),
+                legend=dict(orientation="h", y=1.1, x=0)
+            )
             st.plotly_chart(fig_i, use_container_width=True)
             
         with c2:
@@ -1345,28 +1384,83 @@ def main():
             fig_r.update_layout(height=250, margin=dict(t=20, b=20, l=20, r=20), yaxis_title="% Return", yaxis=dict(tickformat=".1f"))
             st.plotly_chart(fig_r, use_container_width=True)
 
+        st.markdown("**Savings Rate (Accumulation Phase)**")
+        # Keep original savings rate chart but limit to working years to avoid confusion
+        df_savings_plot = df_income[df_income["Age"] < stop_age]
+        
+        fig_s = go.Figure()
+        fig_s.add_trace(go.Scatter(
+            x=df_savings_plot["Age"], 
+            y=df_savings_plot["SavingsRate"] * 100, 
+            mode='lines', 
+            name="Savings Rate", 
+            line=dict(color="#42A5F5"),
+            hovertemplate="%{y:.1f}%"
+        ))
+        fig_s.update_layout(
+            height=250, 
+            margin=dict(t=20, b=20, l=20, r=20), 
+            yaxis_title="Savings Rate (%)",
+            yaxis=dict(tickformat=".1f")
+        )
+        st.plotly_chart(fig_s, use_container_width=True)
+
     with tab3:
         st.markdown("### Net Worth Summary (Start of Year)")
-        format_dict = {"Balance": "${:,.0f}", "HomeEquity": "${:,.0f}", "NetWorth": "${:,.0f}", "AnnualExpense": "${:,.0f}", "Age": "{:.0f}"}
-        st.dataframe(df_p[["Age", "Balance", "HomeEquity", "NetWorth"]].style.format(format_dict), use_container_width=True, hide_index=True)
+        st.caption("Simplified overview of your projected wealth at the start of each age.")
+        
+        format_dict = {
+            "Balance": "${:,.0f}",
+            "HomeEquity": "${:,.0f}", 
+            "NetWorth": "${:,.0f}",
+            "AnnualExpense": "${:,.0f}",
+            "Age": "{:.0f}"
+        }
+        st.dataframe(
+            df_p[["Age", "Balance", "HomeEquity", "NetWorth"]].style.format(format_dict), 
+            use_container_width=True,
+            hide_index=True
+        )
         
     with tab4:
         st.markdown(f"**Audit Table: {scenario_label}**")
+        
+        # Define formatters for the new lumpy columns
         format_dict_d = {
-            "StartBalance": "${:,.0f}", "EndBalance": "${:,.0f}", "LivingWithdrawal": "${:,.0f}", "TaxPenalty": "${:,.0f}",
-            "KidCost": "${:,.0f}", "CarCost": "${:,.0f}", "HomeCost": "${:,.0f}", "OtherCost1": "${:,.0f}", 
-            "OtherCost2": "${:,.0f}", "TotalPortfolioDraw": "${:,.0f}", "ScenarioActiveIncome": "${:,.0f}",
-            "InvestGrowthYear": "${:,.0f}", "ContribYear": "${:,.0f}", "TotalSpending": "${:,.0f}",
-            "AnnualRate": "{:.2%}", "Age": "{:.0f}"
+            "StartBalance": "${:,.0f}",
+            "EndBalance": "${:,.0f}",
+            "LivingWithdrawal": "${:,.0f}",
+            "TaxPenalty": "${:,.0f}",
+            "KidCost": "${:,.0f}",
+            "CarCost": "${:,.0f}",
+            "HomeCost": "${:,.0f}",
+            "OtherCost1": "${:,.0f}",  # New column
+            "OtherCost2": "${:,.0f}",  # New column
+            "TotalPortfolioDraw": "${:,.0f}",
+            "ScenarioActiveIncome": "${:,.0f}",
+            "InvestGrowthYear": "${:,.0f}",
+            "ContribYear": "${:,.0f}",
+            "TotalSpending": "${:,.0f}",
+            "AnnualRate": "{:.2%}",
+            "Age": "{:.0f}"
         }
-        cols = ["Age", "StartBalance", "AnnualRate", "InvestGrowthYear", "ContribYear", "EndBalance", "TotalSpending", "LivingWithdrawal", "TaxPenalty", "KidCost", "CarCost", "HomeCost", "OtherCost1", "OtherCost2", "ScenarioActiveIncome"]
-        st.dataframe(df_p[cols].style.format(format_dict_d), use_container_width=True, hide_index=True)
+        
+        # Add the new lumpy costs to the column list
+        cols = [
+            "Age", "StartBalance", "AnnualRate", "InvestGrowthYear", 
+            "ContribYear", "EndBalance", "TotalSpending", "LivingWithdrawal", 
+            "TaxPenalty", "KidCost", "CarCost", "HomeCost", 
+            "OtherCost1", "OtherCost2", "ScenarioActiveIncome"
+        ]
+        
+        st.dataframe(
+            df_p[cols].style.format(format_dict_d),
+            use_container_width=True,
+            hide_index=True
+        )
 
 if __name__ == "__main__":
     main()
-
-
-
 
 
 
